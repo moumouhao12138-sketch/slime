@@ -1,0 +1,52 @@
+[project]
+name = "slime-cairn"
+version = "0.0.37"
+description = "Persistent multi-project, Cairn-inspired exploration runtime"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["agents", "automation", "cairn", "orchestration", "physarum"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: FastAPI",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "fastapi>=0.115",
+    "httpx>=0.27,<1",
+    "uvicorn[standard]>=0.30",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+slime = "slime_cairn.cli:main"
+slime-cairn-api = "slime_cairn.api:main"
+slime-cairn-service = "slime_cairn.service_main:main"
+slime-cairn-doctor = "slime_cairn.diagnostics:main"
+slime-cairn-e2e = "slime_cairn.e2e:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/slime_cairn"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+
+
+
+

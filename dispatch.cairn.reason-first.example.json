@@ -1,0 +1,54 @@
+{
+  "schema_version": 2,
+  "container": {
+    "init": true
+  },
+  "runtime": {
+    "execution": "container",
+    "prompt_group": "default",
+    "interval": 3,
+    "max_workers": 3,
+    "max_project_workers": 3,
+    "max_running_projects": 1,
+    "lease_seconds": 15,
+    "reason_lease_seconds": 15,
+    "heartbeat_interval": 3,
+    "reason_batch_size": 2,
+    "reason_debounce_seconds": 1.0,
+    "max_intent_attempts": 6,
+    "intent_failure_backoff_seconds": 30,
+    "intent_failure_backoff_max_seconds": 1800,
+    "state_heartbeat_interval": 2.0,
+    "reason_failure_cooldown_seconds": 5,
+    "reason_failure_backoff_max_seconds": 5,
+    "worker_rejected_cooldown_seconds": 5,
+    "growth_selection_mode": "sma_discrete",
+    "growth_exploration_probability": 0.12,
+    "growth_exploration_min_probability": 0.03,
+    "growth_convergence_selections": 24,
+    "growth_random_seed": "slime-sma-v1",
+    "worker_healthcheck": "startup_only",
+    "healthcheck_timeout": 15
+  },
+  "tasks": {
+    "bootstrap": {"timeout": 300, "conclude_timeout": 90},
+    "reason": {"timeout": 300, "max_intents": 2},
+    "explore": {"timeout": 300, "conclude_timeout": 90}
+  },
+  "workers": [
+    {
+      "name": "codex-reason-first",
+      "type": "codex",
+      "execution": "native-agent",
+      "task_types": ["explore", "reason"],
+      "max_running": 2,
+      "priority": 0,
+      "max_report_items": 30,
+      "env": {
+        "CODEX_MODEL": "${SLIME_CODEX_MODEL|SLIME_LLM_MODEL}",
+        "CODEX_BASE_URL": "${SLIME_CODEX_BASE_URL|SLIME_LLM_BASE_URL}",
+        "OPENAI_API_KEY": "${SLIME_CODEX_API_KEY|SLIME_LLM_API_KEY}"
+      }
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local configuration and generated runtime state
+.env
+.env.*
+!.env.example
+.slime-diagnostics/
+.slime-sessions/
+.slime-smoke-sessions/
+slime-workspaces/
+runs/
+*.db
+*.db-shm
+*.db-wal
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
