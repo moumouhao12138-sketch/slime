@@ -54,132 +54,89 @@ Slime 只支持容器执行后端。一个项目拥有一个容器和一个共�
 | 权限 | 当前用户可运行 Docker | 当前用户可运行 `docker` |
 | 网络 | 取决于 Worker profile | 取决于 Worker profile |
 
-启动前确认：
+## 最简部署
 
-1. Docker Engine 正常运行。
-2. 已构建 `slime-cairn-kali:0.0.21` 镜像。
-3. `.env` 中存在所有已启用 Worker 需要的模型地址、密钥和模型名。
-4. 目标任务和网络访问已经获得明确授权。
+和 Cairn 一样，首次使用只需要准备模型配置，然后执行一个启动命令。
+`slime up` 会自动完成 Python 依赖安装、Docker 就绪检查、Worker 镜像构建、
+Docker 网络创建、运行环境诊断以及 API/Dispatcher 启动。后续重复执行是幂等的，
+已经准备好的依赖、镜像和服务会直接复用。
 
-## 快速开始
-
-以下命令均在项目根目录执行。
-
-### 1. 安装 Python 依赖
-
-Windows PowerShell：
+### Windows
 
 ```powershell
-python -m pip install -e ".[dev]"
-```
-
-Linux：
-
-```sh
-python3 -m venv .venv
-. .venv/bin/activate
-python3 -m pip install -e ".[dev]"
-```
-
-Windows 启动器默认使用 `python`，Linux 启动器默认使用 `python3`。如需固定虚拟环境解释器，在启动 Slime 的 Shell 中设置 `SLIME_PYTHON`。
-
-### 2. 创建环境配置
-
-Windows PowerShell：
-
-```powershell
+git clone https://github.com/moumouhao12138-sketch/slime.git
+cd slime
 Copy-Item .env.example .env
+notepad .env
+.\slime up
+.\slime ui
 ```
 
-Linux：
+### Linux
 
 ```sh
+git clone https://github.com/moumouhao12138-sketch/slime.git
+cd slime
 cp .env.example .env
+${EDITOR:-vi} .env
+./slime up
+./slime ui
 ```
 
-最小的共享模型配置：
+`.env` 最少填写以下三项：
 
 ```dotenv
-SLIME_LLM_BASE_URL=https://api.example.com/v1
-SLIME_LLM_API_KEY=replace-with-a-low-privilege-key
-SLIME_LLM_MODEL=replace-with-model-name
+SLIME_LLM_BASE_URL=https://your-model-endpoint.example/v1
+SLIME_LLM_API_KEY=your-api-key
+SLIME_LLM_MODEL=your-model-name
 ```
 
-适配器专用的 `SLIME_CODEX_*` 和 `SLIME_PI_*` 会覆盖共享的 `SLIME_LLM_*`。不要把真实密钥写入 dispatch JSON、项目 scope、Prompt、测试或文档。
+如果 `.env` 不存在，第一次执行 `slime up` 会自动从模板创建并提示填写，
+不会带着示例密钥启动。适配器专用的 `SLIME_CODEX_*` 和 `SLIME_PI_*`
+仍可覆盖共享配置。
 
-### 3. 构建 Kali Worker 镜像
+默认 UI 地址为 `http://127.0.0.1:8000/`，FastAPI 文档位于
+`http://127.0.0.1:8000/docs`。
 
-Windows PowerShell：
+## 可选准备命令
+
+只准备环境而不启动服务时使用：
+
+```text
+slime setup
+```
+
+`setup` 会创建缺失的 `.env`、安装运行依赖、构建 Worker 镜像、创建网络，
+并安装当前用户的 `slime` 短命令。强制重建 Worker 镜像：
+
+```text
+slime setup --rebuild-worker
+```
+
+需要完全手动控制时，原构建脚本仍然可用：
 
 ```powershell
 .\scripts\finish-docker.ps1
 ```
 
-Linux：
-
 ```sh
 sh scripts/finish-docker.sh
 ```
 
-构建脚本默认使用：
-
-- 基础镜像：`docker.1ms.run/kalilinux/kali-rolling`
-- Kali 软件源：`https://mirrors.ustc.edu.cn/kali/`
-- 输出镜像：`slime-cairn-kali:0.0.21`
-- Reference Assets：默认不安装
-
-Linux 启用 Reference Assets：
-
-```sh
-sh scripts/finish-docker.sh --install-reference-assets true
-```
-
-### 4. 安装短命令
-
-Windows PowerShell：
-
-```powershell
-.\slime install
-```
-
-Linux：
-
-```sh
-sh ./slime install
-```
-
-重新打开终端后即可直接使用：
-
-```text
-slime help
-slime doctor
-slime up
-```
-
-不安装时，Windows 使用 `.\slime ...`，Linux 使用 `sh ./slime ...`。安装只配置当前用户命令，不会启动服务；可用 `slime uninstall` 移除。
-
-### 5. 诊断并启动
-
-```text
-slime doctor
-slime up
-slime ui
-```
-
-`doctor` 检查 Docker、Worker 镜像、容器内 CLI、dispatch 配置和已启用模型端点。只有 `ready.service` 为 `true` 时，运行环境才完整可用。
-
-默认 UI 地址：`http://127.0.0.1:8000/`。
-FastAPI 交互文档默认位于 `http://127.0.0.1:8000/docs`。
+Windows 启动器默认使用 `python`，Linux 启动器默认使用 `python3`。如需固定
+虚拟环境解释器，设置 `SLIME_PYTHON`。`slime doctor` 可单独输出 Docker、
+Worker CLI、dispatch 配置和模型端点诊断结果。
 
 ## CLI 命令
 
 | 命令 | 作用 |
 |---|---|
 | `slime help` | 显示命令示例 |
+| `slime setup` | 自动安装依赖、构建镜像、创建网络并安装短命令，不启动服务 |
 | `slime install` | 安装当前用户短命令 |
 | `slime uninstall` | 移除当前用户短命令 |
 | `slime doctor` | 诊断 Docker、镜像、CLI 和模型端点 |
-| `slime up` | 后台启动 API 和 Dispatcher |
+| `slime up` | 自动准备运行环境并后台启动 API 和 Dispatcher |
 | `slime down` | 停止 API 和 Dispatcher，保留持久数据 |
 | `slime restart` | 重启 API 和 Dispatcher |
 | `slime serve` | 前台运行 API，适合开发调试 |
@@ -193,6 +150,8 @@ FastAPI 交互文档默认位于 `http://127.0.0.1:8000/docs`。
 | `slime pause` / `stop` | 停止项目和活动 Worker |
 | `slime resume` | 恢复同一项目 |
 | `slime delete` | 请求删除项目及其项目级运行数据 |
+
+`slime up --rebuild-worker` 会强制重新构建 Worker 镜像。
 
 Windows PowerShell 参数沿用 `-Name`、`-Target`、`-Follow` 风格。Linux/Python CLI 同时支持 `-Name` 和标准的 `--name` 风格。
 
@@ -408,7 +367,6 @@ Profile 只控制网络和 capability，不提供同一项目内 Worker 之间�
 默认 dispatch 文件：`dispatch.cairn.native.json`。示例文件只有通过 `-Config` 或 `SLIME_DISPATCH_CONFIG` 显式选择时才生效：
 
 - `dispatch.cairn.reason-first.example.json`：Explore/Reason-only 生长配置。
-- `dispatch.native.example.json`：可复制的原生 Worker 配置模板。
 
 ### 健康检查模式
 

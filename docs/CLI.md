@@ -11,12 +11,24 @@ From the repository root, the checked-in launchers work without installation:
 .\slime up
 ```
 
+`slime up` is the one-command deployment path. It creates a missing `.env`
+from `.env.example`, installs missing Python runtime dependencies, starts and
+waits for Docker Desktop on Windows, builds the Worker image when it is absent,
+creates the configured Docker network, runs the strict preflight, and then
+starts the API and Dispatcher. Fill in the model endpoint, key, and model in
+`.env` before the second `slime up`.
+
+Use `slime setup` when you want to prepare the image and command without
+starting services. Add `--rebuild-worker` to either command to force a Worker
+image rebuild.
+
 On Linux, use `sh ./slime help` when the checkout does not preserve executable
 bits. After installation, the generated `~/.local/bin/slime` is executable.
 
 The Windows launcher uses `python` and the Linux launcher uses `python3` by
-default. Install the project into the Python environment that should own Slime
-before starting services:
+default. `slime up` installs missing runtime dependencies into the interpreter
+selected by the launcher. For a manually managed virtualenv, install the
+project explicitly:
 
 ```sh
 python3 -m pip install -e .
@@ -55,7 +67,7 @@ to inspect the PATH change without applying it.
 
 | Area | Commands |
 |---|---|
-| Service | `up`, `down`, `restart`, `doctor`, `ui` |
+| Service | `setup`, `up`, `down`, `restart`, `doctor`, `ui` |
 | Project | `new`, `list`, `status`, `runtime`, `pause`, `resume`, `stop`, `delete` |
 | Observation | `logs`, `logs -Follow` |
 | Foreground development | `serve`, `dispatch` |

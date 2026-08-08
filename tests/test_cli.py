@@ -8,10 +8,28 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from slime_cairn.cli import RuntimeContext, SlimeCli, build_parser
+from slime_cairn.cli import RuntimeContext, SlimeCli, _read_env_file, build_parser
 
 
 class CliTests(unittest.TestCase):
+    @staticmethod
+    def _temporary_context(root: Path) -> RuntimeContext:
+        runs = root / "runs"
+        return RuntimeContext(
+            root=root,
+            config=root / "dispatch.cairn.native.json",
+            database=runs / "slime-server.db",
+            workspaces=runs / "slime-workspaces",
+            runs=runs,
+            service_dir=runs / "service",
+            state_file=runs / "service" / "state.json",
+            profile="raw-network",
+            docker_binary="docker",
+            lab_network="slime-cairn-lab",
+            bind_host="127.0.0.1",
+            port=8000,
+        )
+
     def test_parser_accepts_legacy_single_dash_and_posix_long_options(self):
         parser = build_parser()
 
@@ -20,6 +38,90 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(legacy.name, modern.name)
         self.assertEqual(legacy.target, modern.target)
+
+    def test_parser_exposes_one_command_setup_and_worker_rebuild(self):
+        args = build_parser().parse_args(["setup", "--rebuild-worker"])
+
+        self.assertEqual(args.command, "setup")
+        self.assertTrue(args.rebuild_worker)
+
+    def test_runtime_environment_loads_dotenv_without_overriding_host(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".env").write_text(
+                "SLIME_LLM_MODEL=file-model\nSLIME_LLM_API_KEY='file-key'\n",
+                encoding="utf-8",
+            )
+            context = self._temporary_context(root)
+
+            with patch.dict("os.environ", {"SLIME_LLM_MODEL": "host-model"}, clear=False):
+                environment = context.environment()
+
+            self.assertEqual(environment["SLIME_LLM_MODEL"], "host-model")
+            self.assertEqual(environment["SLIME_LLM_API_KEY"], "file-key")
+            self.assertEqual(_read_env_file(root / ".env")["SLIME_LLM_API_KEY"], "file-key")
+
+    def test_prepare_runtime_creates_env_then_prepares_dependencies_and_docker(self):
+        root = Path(__file__).parents[1]
+        args = build_parser().parse_args(["setup", "--project-root", str(root)])
+        cli = SlimeCli(args, RuntimeContext.from_args(args))
+
+        with (
+            patch.object(cli, "_ensure_env_file", return_value=True) as ensure_env,
+            patch.object(cli, "_validate_model_configuration") as validate,
+            patch.object(cli, "_ensure_python_dependencies") as dependencies,
+            patch.object(cli, "_ensure_docker_engine", return_value="docker") as engine,
+            patch.object(cli, "_ensure_worker_image") as image,
+            patch.object(cli, "_ensure_lab_network") as network,
+        ):
+            created = cli._prepare_runtime(require_model_configuration=True)
+
+        self.assertTrue(created)
+        ensure_env.assert_called_once_with()
+        validate.assert_called_once_with()
+        dependencies.assert_called_once_with()
+        engine.assert_called_once_with()
+        image.assert_called_once_with("docker")
+        network.assert_called_once_with("docker")
+
+    def test_first_setup_copies_env_template(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".env.example").write_text("SLIME_LLM_MODEL=model\n", encoding="utf-8")
+            args = build_parser().parse_args(["setup"])
+            cli = SlimeCli(args, self._temporary_context(root))
+
+            self.assertTrue(cli._ensure_env_file())
+            self.assertEqual(
+                (root / ".env").read_text(encoding="utf-8"),
+                "SLIME_LLM_MODEL=model\n",
+            )
+            self.assertFalse(cli._ensure_env_file())
+
+    def test_model_configuration_rejects_example_placeholders(self):
+        root = Path(__file__).parents[1]
+        args = build_parser().parse_args(["setup", "--project-root", str(root)])
+        cli = SlimeCli(args, RuntimeContext.from_args(args))
+        environment = {
+            "SLIME_LLM_BASE_URL": "https://api.example.com/v1",
+            "SLIME_LLM_API_KEY": "replace-with-a-low-privilege-key",
+            "SLIME_LLM_MODEL": "replace-with-model-name",
+        }
+
+        with patch.object(RuntimeContext, "environment", return_value=environment):
+            with self.assertRaisesRegex(RuntimeError, "Model configuration is incomplete"):
+                cli._validate_model_configuration()
+
+    def test_up_dry_run_does_not_create_runtime_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = build_parser().parse_args(["up", "--dry-run"])
+            cli = SlimeCli(args, self._temporary_context(root))
+
+            with patch.object(cli, "_prepare_runtime"):
+                cli.up()
+
+            self.assertFalse((root / "runs").exists())
 
     def test_profile_block_is_removed_without_touching_surrounding_content(self):
         profile = (

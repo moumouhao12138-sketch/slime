@@ -5,7 +5,6 @@ pyproject.toml                 Package metadata, dependencies, entry points, and
 .env.example                   Safe model and runtime configuration template
 dispatch.cairn.native.json     Default Codex/Pi Workers with optional Claude configuration
 dispatch.cairn.reason-first.example.json  Explore/Reason-only growth example
-dispatch.native.example.json   Copyable explicit native Worker configuration
 slime.cmd                      Repository-local public `slime` launcher
 slime                          POSIX repository-local public `slime` launcher
 bin/slime.cmd                  Windows user-PATH command shim

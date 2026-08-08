@@ -37,6 +37,32 @@ Slime Cairn 当前采用单机多项目模型：
 
 持续集成覆盖 Python 3.10 和 3.13。Worker 镜像当前为 `slime-cairn-kali:0.0.21`。
 
+## 最短部署路径
+
+从 Git checkout 进入项目根目录后，只需创建配置并执行一次 `slime up`：
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+.\slime up
+```
+
+Linux 使用等价命令：
+
+```sh
+cp .env.example .env
+${EDITOR:-vi} .env
+./slime up
+```
+
+`slime up` 会自动安装缺失的 Python 运行依赖，启动并等待 Windows Docker
+Desktop，检查或构建 `slime-cairn-kali:0.0.21`，创建内部网络，运行严格
+Worker/模型预检，然后启动 API 和 Dispatcher。首次缺少 `.env` 时会自动复制
+模板并停止，填写模型 endpoint、API key 和 model 后再次执行即可。
+
+只准备依赖和镜像、不启动服务时使用 `slime setup`；使用
+`slime up --rebuild-worker` 或 `slime setup --rebuild-worker` 强制重建镜像。
+
 ## 3. 宿主机准备
 
 ### 3.1 Windows
@@ -77,9 +103,11 @@ docker info
 
 磁盘主要消耗来自 Kali 镜像、Docker layer、transcript、Evidence 和 workspace。生产部署应监控 `runs/` 与 Docker data root。
 
-## 4. 获取与安装项目
+## 4. 获取与安装项目（手动方式）
 
-进入项目根目录后创建虚拟环境。
+自动部署不需要手动执行本节；`slime up` 会在当前 Python 环境缺少运行依赖
+时自动执行等价安装。需要固定虚拟环境或 CI 环境时，再手动执行以下命令。
+进入项目根目录后创建虚拟环境：
 
 Windows PowerShell：
 
@@ -225,6 +253,10 @@ Worker preflight 和实际任务使用同一代理配置。
 
 ## 7. 构建 Worker 镜像
 
+自动部署不需要手动构建。`slime setup`/`slime up` 会在镜像不存在时调用同一
+构建逻辑。以下脚本适用于需要单独控制基础镜像、Kali 源或 Reference Assets
+的高级场景。
+
 Windows：
 
 ```powershell
@@ -246,6 +278,8 @@ docker image inspect slime-cairn-kali:0.0.21
 构建脚本还会创建内部 lab 网络，并在只读、无网络容器中检查 `/opt/slime-cairn/tools.json` 和 Agent CLI。
 
 ## 8. 安装 `slime` 命令
+
+`slime setup` 会自动安装当前用户短命令；以下是只安装或卸载命令的手动方式。
 
 Windows：
 

@@ -1,8 +1,8 @@
 # Configuration
 
-`dispatch.cairn.native.json` is the production-oriented local default. The two
-`*.example.json` files are templates and are not read unless selected with
-`-Config` or `SLIME_DISPATCH_CONFIG`.
+`dispatch.cairn.native.json` is the production-oriented local default.
+`dispatch.cairn.reason-first.example.json` is an alternate template and is not
+read unless selected with `-Config` or `SLIME_DISPATCH_CONFIG`.
 
 ## Runtime Defaults
 
@@ -81,6 +81,22 @@ Profiles control network capabilities independently:
 `slime up` runs strict diagnostics before starting the Dispatcher.
 Those diagnostics also inspect Docker and execute CLI version checks inside the
 configured Worker image.
+
+## Bootstrap Variables
+
+`slime setup` and `slime up` can build the default Worker image without a
+separate shell script. These optional `.env` values override the build defaults:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SLIME_WORKER_BASE_IMAGE` | `docker.1ms.run/kalilinux/kali-rolling` | Kali base image |
+| `SLIME_KALI_APT_MIRROR` | `https://mirrors.ustc.edu.cn/kali/` | Kali package mirror |
+| `SLIME_KALI_APT_VERIFY_PEER` | `false` | Verify HTTPS peer during image build |
+| `SLIME_INSTALL_NATIVE_AGENTS` | `true` | Install Codex, Claude Code and Pi CLIs |
+| `SLIME_INSTALL_REFERENCE_ASSETS` | `false` | Add optional reference assets |
+
+The command only rebuilds when the image is absent unless
+`--rebuild-worker` is supplied.
 
 ## Secret Boundary
 

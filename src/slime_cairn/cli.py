@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shlex
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -16,9 +19,12 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 import webbrowser
 
+from .execution import DEFAULT_WORKER_IMAGE
+
 
 COMMANDS = (
     "help",
+    "setup",
     "install",
     "uninstall",
     "up",
@@ -41,6 +47,9 @@ COMMANDS = (
 PROFILE_START = "# >>> slime-cairn PATH >>>"
 PROFILE_END = "# <<< slime-cairn PATH <<<"
 LAUNCHER_MARKER = "# Managed by Slime Cairn CLI."
+DEFAULT_WORKER_BASE_IMAGE = "docker.1ms.run/kalilinux/kali-rolling"
+DEFAULT_KALI_APT_MIRROR = "https://mirrors.ustc.edu.cn/kali/"
+RUNTIME_MODULES = ("fastapi", "httpx", "uvicorn", "yaml")
 
 
 class CliError(RuntimeError):
@@ -76,6 +85,27 @@ def _discover_project_root(explicit: str = "") -> Path:
 def _resolve_from(root: Path, value: str) -> Path:
     path = Path(value).expanduser()
     return path.resolve() if path.is_absolute() else (root / path).resolve()
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    """Read the simple KEY=VALUE format supported by the dispatcher."""
+
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[key] = value
+    return values
 
 
 @dataclass(slots=True)
@@ -119,6 +149,8 @@ class RuntimeContext:
 
     def environment(self) -> dict[str, str]:
         environment = dict(os.environ)
+        for key, value in _read_env_file(self.root / ".env").items():
+            environment.setdefault(key, value)
         source = str(self.root / "src")
         existing = environment.get("PYTHONPATH", "")
         environment["PYTHONPATH"] = source + (os.pathsep + existing if existing else "")
@@ -140,6 +172,7 @@ class RuntimeContext:
 def print_help() -> None:
     print("Slime Cairn")
     print()
+    print("  slime setup")
     print("  slime up")
     print("  slime new --name ctf-001 --target https://TARGET/ --start-mode growth")
     print("  slime status --name ctf-001")
@@ -152,6 +185,7 @@ def print_help() -> None:
     print("  slime down")
     print()
     print("Foreground development: slime serve | slime dispatch")
+    print("Environment setup:     slime setup")
     print("Command setup:         slime install | slime uninstall")
 
 
@@ -164,6 +198,7 @@ class SlimeCli:
         command = self.args.command
         actions = {
             "help": self.show_help,
+            "setup": self.setup,
             "install": self.install,
             "uninstall": self.uninstall,
             "up": self.up,
@@ -188,6 +223,235 @@ class SlimeCli:
 
     def show_help(self) -> None:
         print_help()
+
+    def setup(self) -> None:
+        """Prepare a clone for use without starting the control plane."""
+
+        created_env = self._prepare_runtime(require_model_configuration=False)
+        self.install()
+        print("Slime runtime setup complete.")
+        try:
+            self._validate_model_configuration()
+        except CliError:
+            print(f"Next: edit {self.context.root / '.env'}, then run: slime up")
+        else:
+            if created_env:
+                print(f"Review {self.context.root / '.env'}, then run: slime up")
+            else:
+                print("Next: slime up")
+
+    def _prepare_runtime(self, *, require_model_configuration: bool) -> bool:
+        created_env = self._ensure_env_file()
+        if require_model_configuration and not self.args.dry_run:
+            self._validate_model_configuration()
+        self._ensure_python_dependencies()
+        docker = self._ensure_docker_engine()
+        self._ensure_worker_image(docker)
+        self._ensure_lab_network(docker)
+        return created_env
+
+    def _ensure_env_file(self) -> bool:
+        path = self.context.root / ".env"
+        if path.is_file():
+            return False
+        template = self.context.root / ".env.example"
+        if not template.is_file():
+            raise CliError(f"Environment template not found: {template}")
+        if self.args.dry_run:
+            print(f"Would create environment file: {path}")
+            return True
+        shutil.copyfile(template, path)
+        if not _is_windows():
+            path.chmod(0o600)
+        print(f"Created environment file: {path}")
+        return True
+
+    @staticmethod
+    def _placeholder(value: str) -> bool:
+        normalized = value.strip().lower()
+        return (
+            not normalized
+            or "example.com" in normalized
+            or normalized.startswith("replace-")
+            or normalized in {"change-me", "changeme", "xxx", "sk-xxx"}
+        )
+
+    def _validate_model_configuration(self) -> None:
+        environment = self.context.environment()
+        requirements = {
+            "model endpoint": ("SLIME_CODEX_BASE_URL", "SLIME_LLM_BASE_URL"),
+            "model API key": ("SLIME_CODEX_API_KEY", "SLIME_LLM_API_KEY"),
+            "model name": ("SLIME_CODEX_MODEL", "SLIME_LLM_MODEL"),
+        }
+        missing: list[str] = []
+        for label, names in requirements.items():
+            value = next(
+                (
+                    environment.get(name, "")
+                    for name in names
+                    if not self._placeholder(environment.get(name, ""))
+                ),
+                "",
+            )
+            if not value:
+                missing.append(label)
+        if missing:
+            raise CliError(
+                "Model configuration is incomplete ("
+                + ", ".join(missing)
+                + f"). Edit {self.context.root / '.env'} and run slime up again."
+            )
+
+    def _ensure_python_dependencies(self) -> None:
+        missing = [name for name in RUNTIME_MODULES if importlib.util.find_spec(name) is None]
+        if not missing:
+            print("Python runtime ready")
+            return
+        command = [sys.executable, "-m", "pip", "install", "-e", str(self.context.root)]
+        if self.args.dry_run:
+            print("Would install Python runtime dependencies: " + ", ".join(missing))
+            return
+        print("Installing Python runtime dependencies...")
+        completed = subprocess.run(command, cwd=self.context.root, check=False)
+        if completed.returncode:
+            raise CliError("Python dependency installation failed.")
+        importlib.invalidate_caches()
+        unresolved = [name for name in RUNTIME_MODULES if importlib.util.find_spec(name) is None]
+        if unresolved:
+            raise CliError("Python dependencies remain unavailable: " + ", ".join(unresolved))
+        print("Python runtime ready")
+
+    def _resolve_docker_binary(self) -> str:
+        configured = self.context.docker_binary
+        resolved = shutil.which(configured)
+        if resolved:
+            return resolved
+        candidate = Path(configured).expanduser()
+        if candidate.is_file():
+            return str(candidate.resolve())
+        if _is_windows():
+            desktop_cli = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / (
+                "Docker/Docker/resources/bin/docker.exe"
+            )
+            if desktop_cli.is_file():
+                return str(desktop_cli)
+        raise CliError(f"Docker CLI not found: {configured}")
+
+    @staticmethod
+    def _docker_info(docker: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [docker, "info", "--format", "{{.ServerVersion}}"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+
+    def _ensure_docker_engine(self) -> str:
+        docker = self._resolve_docker_binary()
+        if self.args.dry_run:
+            print(f"Would verify Docker Engine: {docker}")
+            return docker
+        result = self._docker_info(docker)
+        if result.returncode == 0 and result.stdout.strip():
+            print(f"Docker Engine ready ({result.stdout.strip()})")
+            return docker
+        if _is_windows():
+            desktop = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / (
+                "Docker/Docker/Docker Desktop.exe"
+            )
+            if desktop.is_file():
+                print("Starting Docker Desktop...")
+                subprocess.Popen(
+                    [str(desktop)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                deadline = time.monotonic() + 180
+                while time.monotonic() < deadline:
+                    time.sleep(3)
+                    result = self._docker_info(docker)
+                    if result.returncode == 0 and result.stdout.strip():
+                        print(f"Docker Engine ready ({result.stdout.strip()})")
+                        return docker
+        detail = (result.stderr or result.stdout).strip()
+        raise CliError("Docker Engine is not ready" + (f": {detail}" if detail else "."))
+
+    def _ensure_worker_image(self, docker: str) -> None:
+        inspect = subprocess.run(
+            [docker, "image", "inspect", DEFAULT_WORKER_IMAGE],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if inspect.returncode == 0 and not self.args.rebuild_worker:
+            print(f"Worker image ready ({DEFAULT_WORKER_IMAGE})")
+            return
+        environment = self.context.environment()
+        command = [
+            docker,
+            "build",
+            "--progress=plain",
+            "--build-arg",
+            "BASE_IMAGE=" + environment.get("SLIME_WORKER_BASE_IMAGE", DEFAULT_WORKER_BASE_IMAGE),
+            "--build-arg",
+            "KALI_APT_MIRROR=" + environment.get("SLIME_KALI_APT_MIRROR", DEFAULT_KALI_APT_MIRROR),
+            "--build-arg",
+            "KALI_APT_VERIFY_PEER=" + environment.get("SLIME_KALI_APT_VERIFY_PEER", "false"),
+            "--build-arg",
+            "INSTALL_NATIVE_AGENTS=" + environment.get("SLIME_INSTALL_NATIVE_AGENTS", "true"),
+            "--build-arg",
+            "INSTALL_REFERENCE_ASSETS=" + environment.get("SLIME_INSTALL_REFERENCE_ASSETS", "false"),
+            "--tag",
+            DEFAULT_WORKER_IMAGE,
+            str(self.context.root / "worker"),
+        ]
+        if self.args.dry_run:
+            print(f"Would build Worker image: {DEFAULT_WORKER_IMAGE}")
+            return
+        print(f"Building Worker image: {DEFAULT_WORKER_IMAGE}")
+        completed = subprocess.run(command, cwd=self.context.root, check=False)
+        if completed.returncode:
+            raise CliError(f"Worker image build failed: {DEFAULT_WORKER_IMAGE}")
+        print(f"Worker image ready ({DEFAULT_WORKER_IMAGE})")
+
+    def _ensure_lab_network(self, docker: str) -> None:
+        inspect = subprocess.run(
+            [docker, "network", "inspect", self.context.lab_network],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if inspect.returncode == 0:
+            print(f"Docker network ready ({self.context.lab_network})")
+            return
+        if self.args.dry_run:
+            print(f"Would create Docker network: {self.context.lab_network}")
+            return
+        completed = subprocess.run(
+            [
+                docker,
+                "network",
+                "create",
+                "--driver",
+                "bridge",
+                "--internal",
+                self.context.lab_network,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if completed.returncode:
+            raise CliError(
+                f"Docker network creation failed ({self.context.lab_network}): "
+                + completed.stderr.strip()
+            )
+        print(f"Docker network ready ({self.context.lab_network})")
 
     def install(self) -> None:
         if _is_windows():
@@ -357,9 +621,8 @@ class SlimeCli:
         return text[:start] + text[end:]
 
     def up(self) -> None:
+        self._prepare_runtime(require_model_configuration=True)
         context = self.context
-        context.service_dir.mkdir(parents=True, exist_ok=True)
-        context.workspaces.mkdir(parents=True, exist_ok=True)
         state = self._read_state()
         server_alive = self._state_process_alive(state, "server")
         dispatcher_alive = self._state_process_alive(state, "dispatcher")
@@ -386,6 +649,8 @@ class SlimeCli:
             print(f"DispatcherAlive: {dispatcher_alive}")
             print(f"RestartNeeded:   {restart_needed}")
             return
+        context.service_dir.mkdir(parents=True, exist_ok=True)
+        context.workspaces.mkdir(parents=True, exist_ok=True)
         if restart_needed:
             print("Service configuration changed; restarting current runtime.")
             self._stop_from_state(state)
@@ -941,6 +1206,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-Log", "--log", choices=("dispatcher", "server", "all"), default="dispatcher")
     parser.add_argument("-Follow", "--follow", action="store_true")
     parser.add_argument("-NoDispatcher", "--no-dispatcher", action="store_true")
+    parser.add_argument("-RebuildWorker", "--rebuild-worker", action="store_true")
     parser.add_argument("-DryRun", "--dry-run", action="store_true")
     parser.add_argument("--project-root", default="")
     return parser
