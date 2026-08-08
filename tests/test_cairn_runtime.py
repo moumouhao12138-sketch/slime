@@ -140,7 +140,7 @@ class CairnRuntimeTests(unittest.TestCase):
         )
 
         self.assertEqual(outcome["accepted_facts"][0].predicate, "native_reachable")
-        self.assertEqual(backend.calls[0]["cwd"], root)
+        self.assertEqual(backend.calls[0]["cwd"], root.resolve())
         self.assertEqual(backend.calls[0]["environment"]["OPENAI_API_KEY"], "test-secret")
         self.assertEqual(len(backend.calls), 1)
         self.assertIn("--dangerously-bypass-approvals-and-sandbox", backend.calls[0]["argv"])

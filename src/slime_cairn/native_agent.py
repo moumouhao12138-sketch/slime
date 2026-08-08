@@ -158,6 +158,7 @@ class NativeSessionState:
     intent_id: str
     mode: str
     session_id: str
+    workspace_root: Path
     directory: Path
     container_directory: str
     backend: NativeAgentBackend
@@ -384,7 +385,7 @@ class NativeAgentMind:
                 "intent_id": state.intent_id,
                 "mode": state.mode,
                 "session_id": state.session_id,
-                "directory": state.directory.relative_to(state.backend.workspace_root).as_posix(),
+                "directory": state.directory.relative_to(state.workspace_root).as_posix(),
                 "container_directory": state.container_directory,
                 "turns": state.turns,
                 "resumed": state.resumed,
@@ -489,17 +490,18 @@ class NativeAgentMind:
 
     def begin_session(self, task: WorkerTask, intent: Intent) -> dict[str, Any]:
         backend = self.backend_resolver(intent.project_id)
-        self._install_resident_instructions(backend.workspace_root)
+        workspace_root = backend.workspace_root.resolve()
+        self._install_resident_instructions(workspace_root)
         digest = sha256(
             f"{self.config.worker_name}:{task.mode}:{intent.id}".encode("utf-8")
         ).hexdigest()[:24]
         relative = Path("pods") / self._safe_name(self.config.worker_name) / digest
-        directory = (backend.workspace_root / relative).resolve()
-        directory.relative_to(backend.workspace_root)
+        directory = (workspace_root / relative).resolve()
+        directory.relative_to(workspace_root)
         directory.mkdir(parents=True, exist_ok=True)
         for child in ("evidence", "transcripts", "results", "sessions"):
             (directory / child).mkdir(parents=True, exist_ok=True)
-        (backend.workspace_root / "shared").mkdir(parents=True, exist_ok=True)
+        (workspace_root / "shared").mkdir(parents=True, exist_ok=True)
 
         manifest = self._read_json(self._manifest_path(directory))
         prior_turns = int(manifest.get("turns", 0) or 0)
@@ -521,6 +523,7 @@ class NativeAgentMind:
                 intent_id=intent.id,
                 mode=task.mode,
                 session_id=str(manifest.get("session_id")) if resumable else str(uuid4()),
+                workspace_root=workspace_root,
                 directory=directory,
                 container_directory=container_directory,
                 backend=backend,
@@ -571,7 +574,7 @@ class NativeAgentMind:
             "recoverable": True,
             "status": state.status,
             "manifest": str(self._manifest_path(state.directory)),
-            "pod_directory": state.directory.relative_to(state.backend.workspace_root).as_posix(),
+            "pod_directory": state.directory.relative_to(state.workspace_root).as_posix(),
             "container_directory": state.container_directory,
             "transcript_refs": list(state.transcript_refs),
             "fallback": dict(state.fallback),
@@ -864,7 +867,7 @@ fi
             # Keeps lightweight test backends and older integrations usable.
             return state.backend.execute_with_environment(
                 argv,
-                state.backend.workspace_root,
+                state.workspace_root,
                 command_timeout,
                 self.config.environment,
             )
@@ -872,7 +875,7 @@ fi
         try:
             command = starter(
                 argv,
-                state.backend.workspace_root,
+                state.workspace_root,
                 self.config.environment,
                 timeout_seconds=command_timeout,
                 kill_after_seconds=5,
@@ -880,7 +883,7 @@ fi
         except TypeError:
             # Compatibility for older integrations and lightweight test
             # doubles that still expose Cairn's three-argument backend API.
-            command = starter(argv, state.backend.workspace_root, self.config.environment)
+            command = starter(argv, state.workspace_root, self.config.environment)
         self._register_active_command(state, command)
         try:
             # The container-side GNU timeout owns the phase deadline and has a
@@ -1255,7 +1258,7 @@ fi
             )
             result_path = state.directory / "results" / f"turn-{state.turns:03d}.json"
             self._write_json_atomic(result_path, normalized)
-            result_ref = result_path.relative_to(state.backend.workspace_root).as_posix()
+            result_ref = result_path.relative_to(state.workspace_root).as_posix()
             evidence_refs = sorted(
                 set([*attempt_transcript_refs, result_ref, *normalized.get("evidence_refs", [])])
             )
@@ -1947,7 +1950,7 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
             "summary": summary.strip()[:2000],
             "outcome": outcome,
             "contract": "cairn",
-            "pod_path": state.directory.relative_to(state.backend.workspace_root).as_posix(),
+            "pod_path": state.directory.relative_to(state.workspace_root).as_posix(),
             "facts": list(facts or []),
             "hypotheses": [],
             "proposed_intents": list(intents or []),
@@ -2143,7 +2146,7 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
                     raise PermissionError(f"native evidence 越出伪足目录: {raw}") from exc
                 if not candidate.exists():
                     raise ValueError(f"native evidence 文件不存在: {raw}")
-                ref = candidate.relative_to(state.backend.workspace_root).as_posix()
+                ref = candidate.relative_to(state.workspace_root).as_posix()
                 refs.append(ref)
                 evidence_refs.append(ref)
             return sorted(set(refs))
@@ -2229,7 +2232,7 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
         return (
             {
                 "summary": summary,
-                "pod_path": state.directory.relative_to(state.backend.workspace_root).as_posix(),
+                "pod_path": state.directory.relative_to(state.workspace_root).as_posix(),
                 "facts": facts,
                 "hypotheses": hypotheses,
                 "proposed_intents": intents,
@@ -2332,6 +2335,6 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
             "error": error,
         }
         self._write_json_atomic(transcript, payload)
-        ref = transcript.relative_to(state.backend.workspace_root).as_posix()
+        ref = transcript.relative_to(state.workspace_root).as_posix()
         state.transcript_refs.append(ref)
         return ref

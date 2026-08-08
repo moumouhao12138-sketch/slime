@@ -69,6 +69,27 @@ def task_and_intent(worker_name: str) -> tuple[WorkerTask, Intent]:
 
 
 class NativeSessionRecoveryTests(unittest.TestCase):
+    def test_session_normalizes_workspace_root_before_path_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "parent" / ".." / "workspace"
+            backend = RecordingBackend(root)
+            mind = NativeAgentMind(
+                NativeAgentConfig("codex-native", "codex-cli", "codex"),
+                lambda project_id: backend,
+            )
+            task, intent = task_and_intent("codex-native")
+
+            info = mind.begin_session(task, intent)
+            try:
+                state = mind._state()
+                self.assertEqual(state.workspace_root, root.resolve())
+                self.assertEqual(
+                    info["pod_directory"],
+                    state.directory.relative_to(root.resolve()).as_posix(),
+                )
+            finally:
+                mind.end_session("completed")
+
     def test_prompt_write_falls_back_when_existing_prompt_is_locked(self):
         with tempfile.TemporaryDirectory() as temporary:
             backend = RecordingBackend(Path(temporary))
