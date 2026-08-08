@@ -1,6 +1,0 @@
-# Keep repository text and POSIX entry points in LF form.
-* text=auto eol=lf
-
-# Native Windows launchers use CRLF.
-*.cmd text eol=crlf
-*.ps1 text eol=crlf

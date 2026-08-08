@@ -1,8 +1,0 @@
-#!/bin/sh
-set -eu
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-PROJECT_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-PYTHON=${SLIME_PYTHON:-python3}
-export SLIME_PROJECT_ROOT="$PROJECT_ROOT"
-export PYTHONPATH="$PROJECT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
-exec "$PYTHON" -m slime_cairn.cli "$@"
