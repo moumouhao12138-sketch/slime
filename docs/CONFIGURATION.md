@@ -98,7 +98,7 @@ Pi 使用 OpenAI Chat Completions 兼容接口。Claude 使用 `ANTHROPIC_*` 环
 | `SLIME_PYTHON_IMAGE` | `python:3.13-slim` |
 | `SLIME_DOCKER_CLI_IMAGE` | `docker:29-cli` |
 | `SLIME_WORKER_BASE_IMAGE` | `kalilinux/kali-rolling` |
-| `SLIME_KALI_APT_MIRROR` | `https://mirrors.ustc.edu.cn/kali/` |
+| `SLIME_KALI_APT_MIRROR` | `http://http.kali.org/kali` |
 | `SLIME_KALI_APT_VERIFY_PEER` | `true` |
 | `SLIME_INSTALL_NATIVE_AGENTS` | `true` |
 | `SLIME_INSTALL_REFERENCE_ASSETS` | `false` |

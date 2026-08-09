@@ -1,7 +1,7 @@
 ARG BASE_IMAGE=kalilinux/kali-rolling
 FROM ${BASE_IMAGE}
 
-ARG KALI_APT_MIRROR=https://mirrors.ustc.edu.cn/kali/
+ARG KALI_APT_MIRROR=http://http.kali.org/kali
 ARG KALI_APT_VERIFY_PEER=true
 ARG INSTALL_NATIVE_AGENTS=true
 ARG INSTALL_REFERENCE_ASSETS=false

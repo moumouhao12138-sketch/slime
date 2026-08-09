@@ -163,7 +163,7 @@ Health   http://127.0.0.1:8000/health
 | `SLIME_PYTHON_IMAGE` | `python:3.13-slim` | 应用镜像基础环境 |
 | `SLIME_DOCKER_CLI_IMAGE` | `docker:29-cli` | 注入应用镜像的 Docker CLI |
 | `SLIME_WORKER_BASE_IMAGE` | `kalilinux/kali-rolling` | Worker 基础镜像 |
-| `SLIME_KALI_APT_MIRROR` | USTC Kali 镜像 | Worker 软件源 |
+| `SLIME_KALI_APT_MIRROR` | Kali 官方镜像 | Worker 软件源 |
 | `SLIME_INSTALL_NATIVE_AGENTS` | `true` | 安装 Codex、Claude、Pi CLI |
 | `SLIME_INSTALL_REFERENCE_ASSETS` | `false` | 构建时下载额外参考资产 |
 
