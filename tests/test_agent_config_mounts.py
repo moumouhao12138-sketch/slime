@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from slime_cairn.workers.execution import (
     DEFAULT_WORKER_IMAGE,
@@ -159,7 +161,17 @@ class AgentConfigMountTests(unittest.TestCase):
 
             nested = backend.workspace_root / "pods" / "fixture"
             nested.mkdir(parents=True)
-            backend.prepare_writable_path(nested)
+            if os.name == "posix":
+                with patch("slime_cairn.workers.execution.os.chown") as chown:
+                    backend.prepare_writable_path(nested)
+                chown.assert_called_once_with(
+                    nested.resolve(),
+                    65532,
+                    65532,
+                    follow_symlinks=False,
+                )
+            else:
+                backend.prepare_writable_path(nested)
             pid_path, container_pid_path = backend._pid_file()
             self.assertEqual(pid_path.parent.name, ".slime-cairn-runtime")
             self.assertTrue(container_pid_path.startswith("/workspace/.slime-cairn-runtime/"))
