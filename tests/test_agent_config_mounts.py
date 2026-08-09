@@ -164,15 +164,22 @@ class AgentConfigMountTests(unittest.TestCase):
             if os.name == "posix":
                 with patch("slime_cairn.workers.execution.os.chown") as chown:
                     backend.prepare_writable_path(nested)
-                chown.assert_called_once_with(
+                    pid_path, container_pid_path = backend._pid_file()
+                chown.assert_any_call(
                     nested.resolve(),
+                    65532,
+                    65532,
+                    follow_symlinks=False,
+                )
+                chown.assert_any_call(
+                    pid_path.parent.resolve(),
                     65532,
                     65532,
                     follow_symlinks=False,
                 )
             else:
                 backend.prepare_writable_path(nested)
-            pid_path, container_pid_path = backend._pid_file()
+                pid_path, container_pid_path = backend._pid_file()
             self.assertEqual(pid_path.parent.name, ".slime-cairn-runtime")
             self.assertTrue(container_pid_path.startswith("/workspace/.slime-cairn-runtime/"))
             with self.assertRaises(ValueError):
