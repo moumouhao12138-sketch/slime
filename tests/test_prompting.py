@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from slime_cairn.prompting import (
+from slime_cairn.protocol.prompting import (
     PROMPT_REQUIRED_TOKENS,
     load_prompt,
     render_prompt,

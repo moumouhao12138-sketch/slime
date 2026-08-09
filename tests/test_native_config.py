@@ -6,13 +6,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from slime_cairn.dispatcher import load_dispatch_config
-from slime_cairn.native_agent import NativeAgentMind
+from slime_cairn.dispatcher.loop import load_dispatch_config
+from slime_cairn.workers.native import NativeAgentMind
 
 
 class NativeDispatchConfigTests(unittest.TestCase):
     def test_dispatcher_defaults_bound_retries_and_probe_workers_at_startup(self):
-        from slime_cairn.dispatcher import DispatcherConfig
+        from slime_cairn.dispatcher.loop import DispatcherConfig
 
         config = DispatcherConfig()
 
@@ -86,7 +86,7 @@ class NativeDispatchConfigTests(unittest.TestCase):
 
     def test_default_config_uses_a_general_capability_pool(self):
         root = Path(__file__).parents[1]
-        payload = json.loads((root / "dispatch.cairn.native.json").read_text(encoding="utf-8"))
+        payload = json.loads((root / "dispatch.json").read_text(encoding="utf-8"))
 
         workers = payload["workers"]
         expected = {"bootstrap", "explore", "reason"}
@@ -100,12 +100,15 @@ class NativeDispatchConfigTests(unittest.TestCase):
         claude = next(worker for worker in workers if worker["name"] == "claude-native")
         self.assertEqual(claude["max_running"], 2)
         self.assertEqual(claude["priority"], 0)
-        self.assertNotIn("env", claude)
         self.assertEqual(
             claude["environment"]["CLAUDE_CONFIG_DIR"],
             "/workspace/shared/agent-homes/claude",
         )
-        self.assertEqual(payload["runtime"]["worker_healthcheck"], "startup_only")
+        self.assertEqual(
+            claude["env"]["ANTHROPIC_AUTH_TOKEN"],
+            "${SLIME_CLAUDE_API_KEY|SLIME_LLM_API_KEY}",
+        )
+        self.assertEqual(payload["runtime"]["worker_healthcheck"], "disabled")
         self.assertEqual(payload["runtime"]["prompt_group"], "default")
         self.assertEqual(payload["runtime"]["max_intent_attempts"], 6)
 
@@ -120,15 +123,8 @@ class NativeDispatchConfigTests(unittest.TestCase):
         self.assertNotIn("memory", payload["container"])
         self.assertNotIn("cpus", payload["container"])
         self.assertTrue(payload["container"]["init"])
-        self.assertEqual(payload["container"]["credential_source"], "host-config")
-        self.assertEqual(
-            payload["container"]["agent_config_mounts"]["claude"]["target"],
-            "/host-agent-config/claude",
-        )
-        self.assertEqual(
-            payload["container"]["agent_config_mounts"]["claude"]["source"],
-            "~/.claude",
-        )
+        self.assertNotIn("credential_source", payload["container"])
+        self.assertNotIn("agent_config_mounts", payload["container"])
         pi = next(worker for worker in workers if worker["name"] == "pi-native")
         self.assertEqual(pi["env"]["PI_MODEL"], "${SLIME_PI_MODEL|SLIME_LLM_MODEL}")
         self.assertEqual(pi["env"]["PI_PROVIDER_API"], "openai-completions")
@@ -200,7 +196,7 @@ class NativeDispatchConfigTests(unittest.TestCase):
             self.assertEqual(native.timeout_for("explore", conclude=True), 19)
 
     def test_rejects_invalid_growth_selection_configuration(self):
-        from slime_cairn.dispatcher import DispatcherConfig
+        from slime_cairn.dispatcher.loop import DispatcherConfig
 
         invalid_cases = [
             ({"growth_selection_mode": "unknown"}, "growth_selection_mode"),

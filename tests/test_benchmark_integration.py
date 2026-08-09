@@ -9,18 +9,18 @@ from unittest.mock import patch
 import httpx
 from fastapi.testclient import TestClient
 
-from slime_cairn import api
-from slime_cairn.benchmark import BenchmarkClient, BenchmarkError, BenchmarkSettings
-from slime_cairn.benchmark_automation import BenchmarkAutomationService
-from slime_cairn.benchmark_runtime import (
+from slime_cairn.server import api
+from slime_cairn.integrations.benchmark.client import BenchmarkClient, BenchmarkError, BenchmarkSettings
+from slime_cairn.integrations.benchmark.automation import BenchmarkAutomationService
+from slime_cairn.integrations.benchmark.runtime import (
     BenchmarkProjectController,
     extract_flag_candidates,
     extract_submission_candidates,
 )
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.cairn_contracts import validate_reason_payload
-from slime_cairn.models import CompletionProposal, FactCandidate, IntentProposal, PseudopodReport
-from slime_cairn.scheduler import Scheduler
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.protocol.contracts import validate_reason_payload
+from slime_cairn.domain.models import CompletionProposal, FactCandidate, IntentProposal, PseudopodReport
+from slime_cairn.dispatcher.scheduler import Scheduler
 
 
 class BenchmarkPlatformFixture:

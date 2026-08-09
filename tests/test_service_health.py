@@ -4,9 +4,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.dispatcher import DispatcherConfig, WorkerPool, WorkerRuntime
-from slime_cairn.service import DispatcherService, ProjectRuntimeBinding
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.dispatcher.loop import DispatcherConfig, WorkerPool, WorkerRuntime
+from slime_cairn.dispatcher.service import DispatcherService, ProjectRuntimeBinding
 
 
 class HealthMind:

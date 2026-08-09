@@ -1,0 +1,96 @@
+name: slime
+
+x-app: &app
+  image: ${SLIME_APP_IMAGE:-ghcr.io/moumouhao12138-sketch/slime:0.0.37}
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      PYTHON_IMAGE: ${SLIME_PYTHON_IMAGE:-python:3.13-slim}
+      DOCKER_CLI_IMAGE: ${SLIME_DOCKER_CLI_IMAGE:-docker:29-cli}
+  env_file:
+    - path: .env
+      required: false
+  environment: &app-environment
+    SLIME_CAIRN_DB: /data/slime.db
+    SLIME_DISPATCH_CONFIG: /app/dispatch.json
+    SLIME_RUNTIME_MODE: docker
+    SLIME_RUNTIME_EXECUTION: container
+    SLIME_WORKSPACES_ROOT: /workspaces
+    SLIME_WORKSPACES_VOLUME: slime-workspaces
+    SLIME_WORKER_IMAGE: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37}
+    SLIME_LAB_NETWORK: slime-lab
+  init: true
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *app
+    command:
+      - python
+      - -m
+      - uvicorn
+      - slime_cairn.server.api:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    ports:
+      - "${SLIME_BIND_ADDRESS:-127.0.0.1}:${SLIME_PORT:-8000}:8000"
+    volumes:
+      - slime-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  dispatcher:
+    <<: *app
+    command:
+      - python
+      - -m
+      - slime_cairn.dispatcher.main
+    depends_on:
+      api:
+        condition: service_healthy
+      worker-image:
+        condition: service_completed_successfully
+    volumes:
+      - slime-data:/data
+      - slime-workspaces:/workspaces
+      - ${SLIME_DISPATCH_FILE:-./dispatch.json}:/app/dispatch.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - default
+      - slime-lab
+
+  worker-image:
+    image: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37}
+    build:
+      context: worker
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${SLIME_WORKER_BASE_IMAGE:-kalilinux/kali-rolling}
+        KALI_APT_MIRROR: ${SLIME_KALI_APT_MIRROR:-https://mirrors.ustc.edu.cn/kali/}
+        KALI_APT_VERIFY_PEER: ${SLIME_KALI_APT_VERIFY_PEER:-true}
+        INSTALL_NATIVE_AGENTS: ${SLIME_INSTALL_NATIVE_AGENTS:-true}
+        INSTALL_REFERENCE_ASSETS: ${SLIME_INSTALL_REFERENCE_ASSETS:-false}
+    command:
+      - "true"
+    restart: "no"
+
+volumes:
+  slime-data:
+    name: slime-data
+  slime-workspaces:
+    name: slime-workspaces
+
+networks:
+  slime-lab:
+    name: slime-lab

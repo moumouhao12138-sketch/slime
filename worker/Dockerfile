@@ -58,6 +58,8 @@ RUN (setcap -r /usr/lib/nmap/nmap || true) \
     && python3 /usr/local/bin/build_tool_manifest.py /opt/slime-cairn/tools.json \
     && groupadd --gid 65532 slime \
     && useradd --uid 65532 --gid 65532 --home-dir /workspace --no-create-home slime \
+    && mkdir -p /workspace \
+    && chown 65532:65532 /workspace \
     && chmod -R a+rX /opt/slime-cairn
 
 WORKDIR /workspace

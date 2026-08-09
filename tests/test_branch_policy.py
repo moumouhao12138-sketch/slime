@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from slime_cairn.branch_policy import SmaBranchPolicy
-from slime_cairn.models import Intent
+from slime_cairn.domain.branch_policy import SmaBranchPolicy
+from slime_cairn.domain.models import Intent
 
 
 def intent(

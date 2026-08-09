@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from slime_cairn.cairn_contracts import (
+from slime_cairn.protocol.contracts import (
     extract_explore_submissions,
     parse_json_output,
     validate_bootstrap_conclude_payload,

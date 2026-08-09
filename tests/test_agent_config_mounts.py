@@ -4,11 +4,18 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from slime_cairn.execution import AgentConfigMount, CommandExecution, PersistentDockerBackend, PersistentDockerConfig
-from slime_cairn.worker_manager import (
+from slime_cairn.workers.execution import (
+    DEFAULT_WORKER_IMAGE,
+    AgentConfigMount,
+    CommandExecution,
+    PersistentDockerBackend,
+    PersistentDockerConfig,
+)
+from slime_cairn.workers.manager import (
     ContainerResourceLimits,
     LAB_NETWORK_ADMIN_PROFILE,
     RAW_NETWORK_PROFILE,
+    STANDARD_PROFILE,
     WorkerManager,
     active_agent_config_mounts,
     parse_agent_config_mounts,
@@ -16,6 +23,10 @@ from slime_cairn.worker_manager import (
 
 
 class AgentConfigMountTests(unittest.TestCase):
+    def test_standard_profile_has_upstream_network_without_extra_capabilities(self):
+        self.assertEqual(STANDARD_PROFILE.network, "bridge")
+        self.assertEqual(STANDARD_PROFILE.capabilities, ())
+
     def test_disabled_agent_mounts_do_not_require_host_configuration(self):
         configured = {
             "claude": {
@@ -127,6 +138,34 @@ class AgentConfigMountTests(unittest.TestCase):
             )
             self.assertIn("--read-only", command)
 
+    def test_persistent_container_mounts_one_named_volume_subdirectory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = PersistentDockerBackend(
+                Path(temporary) / "project-one",
+                PersistentDockerConfig(
+                    container_name="slime-named-volume",
+                    workspace_volume="slime-workspaces",
+                    workspace_volume_subpath="project-one",
+                ),
+            )
+
+            command = backend.create_command()
+            mounts = [command[index + 1] for index, value in enumerate(command) if value == "--mount"]
+            self.assertIn(
+                "type=volume,source=slime-workspaces,target=/workspace,volume-subpath=project-one",
+                mounts,
+            )
+            self.assertNotIn("--volume", command)
+
+            nested = backend.workspace_root / "pods" / "fixture"
+            nested.mkdir(parents=True)
+            backend.prepare_writable_path(nested)
+            pid_path, container_pid_path = backend._pid_file()
+            self.assertEqual(pid_path.parent.name, ".slime-cairn-runtime")
+            self.assertTrue(container_pid_path.startswith("/workspace/.slime-cairn-runtime/"))
+            with self.assertRaises(ValueError):
+                backend.prepare_writable_path(Path(temporary).resolve())
+
     def test_worker_manager_propagates_mounts_and_locks_them_after_creation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -207,7 +246,7 @@ class AgentConfigMountTests(unittest.TestCase):
                 ["inspect", "inspect", "inspect", "stop", "rm", "create", "start"],
             )
             create = calls[5]
-            self.assertIn("slime-cairn-kali:0.0.21", create)
+            self.assertIn(DEFAULT_WORKER_IMAGE, create)
             self.assertIn(f"{backend.workspace_root}:/workspace:rw", create)
 
     def test_real_runtime_recreates_container_when_same_tag_points_to_new_image(self):
@@ -222,11 +261,11 @@ class AgentConfigMountTests(unittest.TestCase):
                     if command[3] == "{{.State.Running}}":
                         return CommandExecution(0, "false\n", "")
                     if command[3] == "{{.Config.Image}}":
-                        return CommandExecution(0, "slime-cairn-kali:0.0.21\n", "")
+                        return CommandExecution(0, f"{DEFAULT_WORKER_IMAGE}\n", "")
                     if command[3] == "{{.Image}}":
                         return CommandExecution(0, "sha256:old\n", "")
                     if command[3] == "{{.HostConfig.NetworkMode}}":
-                        return CommandExecution(0, "none\n", "")
+                        return CommandExecution(0, "bridge\n", "")
                     if command[3] == "{{json .HostConfig}}":
                         return CommandExecution(
                             0,
@@ -266,7 +305,7 @@ class AgentConfigMountTests(unittest.TestCase):
                     if command[3] == "{{.State.Running}}":
                         return CommandExecution(0, "false\n", "")
                     if command[3] == "{{.Config.Image}}":
-                        return CommandExecution(0, "slime-cairn-kali:0.0.21\n", "")
+                        return CommandExecution(0, f"{DEFAULT_WORKER_IMAGE}\n", "")
                     if command[3] == "{{.HostConfig.NetworkMode}}":
                         return CommandExecution(0, "fixture-lab\n", "")
                 return CommandExecution(0, "", "")
@@ -292,9 +331,9 @@ class AgentConfigMountTests(unittest.TestCase):
                     if command[3] == "{{.State.Running}}":
                         return CommandExecution(0, "true\n", "")
                     if command[3] == "{{.Config.Image}}":
-                        return CommandExecution(0, "slime-cairn-kali:0.0.21\n", "")
+                        return CommandExecution(0, f"{DEFAULT_WORKER_IMAGE}\n", "")
                     if command[3] == "{{.HostConfig.NetworkMode}}":
-                        return CommandExecution(0, "none\n", "")
+                        return CommandExecution(0, "bridge\n", "")
                     if command[3] == "{{json .HostConfig}}":
                         return CommandExecution(
                             0,

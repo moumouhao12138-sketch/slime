@@ -5,8 +5,8 @@ import tempfile
 import time
 import unittest
 
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.models import IntentProposal
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.domain.models import IntentProposal
 
 
 class IntentRetryTests(unittest.TestCase):

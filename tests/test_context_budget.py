@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from slime_cairn.context import ContextBuilder
-from slime_cairn.models import Fact, Intent, Project
+from slime_cairn.domain.context import ContextBuilder
+from slime_cairn.domain.models import Fact, Intent, Project
 
 
 class CairnFileContextTests(unittest.TestCase):

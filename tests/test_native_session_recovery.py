@@ -6,11 +6,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from slime_cairn.context import ContextCapsule, ContextManifest
-from slime_cairn.execution import CommandExecution
-from slime_cairn.model_health import ModelEndpoint
-from slime_cairn.models import Intent, WorkerTask
-from slime_cairn.native_agent import NativeAgentConfig, NativeAgentMind
+from slime_cairn.domain.context import ContextCapsule, ContextManifest
+from slime_cairn.workers.execution import CommandExecution
+from slime_cairn.workers.health import ModelEndpoint
+from slime_cairn.domain.models import Intent, WorkerTask
+from slime_cairn.workers.native import NativeAgentConfig, NativeAgentMind
 
 
 class RecordingBackend:

@@ -8,14 +8,14 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from slime_cairn import api
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.dispatcher import DispatcherConfig, WorkerPool, WorkerRuntime
-from slime_cairn.execution import CommandExecution
-from slime_cairn.models import FactCandidate, HypothesisCandidate, IntentProposal
-from slime_cairn.service import DispatcherService, ProjectRuntimeBinding
-from slime_cairn.worker_manager import WorkerManager
-from slime_cairn.workspace import IsolatedWorkspace
+from slime_cairn.server import api
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.dispatcher.loop import DispatcherConfig, WorkerPool, WorkerRuntime
+from slime_cairn.workers.execution import CommandExecution
+from slime_cairn.domain.models import FactCandidate, HypothesisCandidate, IntentProposal
+from slime_cairn.dispatcher.service import DispatcherService, ProjectRuntimeBinding
+from slime_cairn.workers.manager import WorkerManager
+from slime_cairn.domain.workspace import IsolatedWorkspace
 
 
 CHILD_TABLES = (

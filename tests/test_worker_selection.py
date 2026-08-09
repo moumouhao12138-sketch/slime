@@ -7,11 +7,11 @@ import threading
 import time
 import unittest
 
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.dispatcher import AsyncDispatcher, DispatcherConfig, WorkerPool, WorkerRuntime, load_dispatch_config
-from slime_cairn.models import IntentProposal, PseudopodReport
-from slime_cairn.scheduler import Scheduler
-from slime_cairn.workspace import IsolatedWorkspace
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.dispatcher.loop import AsyncDispatcher, DispatcherConfig, WorkerPool, WorkerRuntime, load_dispatch_config
+from slime_cairn.domain.models import IntentProposal, PseudopodReport
+from slime_cairn.dispatcher.scheduler import Scheduler
+from slime_cairn.domain.workspace import IsolatedWorkspace
 
 
 class ImmediateMind:

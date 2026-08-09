@@ -7,9 +7,9 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from slime_cairn import api
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.models import IntentProposal
+from slime_cairn.server import api
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.domain.models import IntentProposal
 
 
 class IntentRetryApiTests(unittest.TestCase):

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from slime_cairn.cairn_contracts import validate_reason_payload
+from slime_cairn.protocol.contracts import validate_reason_payload
 
 
 class ReasonSourceValidationTests(unittest.TestCase):

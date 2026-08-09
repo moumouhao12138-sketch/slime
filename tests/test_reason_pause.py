@@ -5,9 +5,9 @@ import tempfile
 import time
 import unittest
 
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.dispatcher import AsyncDispatcher, DispatcherConfig, WorkerPool, WorkerRuntime
-from slime_cairn.scheduler import Scheduler
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.dispatcher.loop import AsyncDispatcher, DispatcherConfig, WorkerPool, WorkerRuntime
+from slime_cairn.dispatcher.scheduler import Scheduler
 
 
 class ReasonPauseTests(unittest.TestCase):

@@ -6,9 +6,9 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from slime_cairn import api
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.models import FactCandidate, HypothesisCandidate, IntentProposal
+from slime_cairn.server import api
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.domain.models import FactCandidate, HypothesisCandidate, IntentProposal
 
 
 class ObservabilityApiTests(unittest.TestCase):

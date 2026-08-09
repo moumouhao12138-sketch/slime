@@ -5,11 +5,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from slime_cairn.context import ContextCapsule, ContextManifest
-from slime_cairn.execution import CommandExecution
-from slime_cairn.models import Fact, Intent, IntentProposal
-from slime_cairn.native_agent import NativeAgentConfig, NativeAgentMind
-from slime_cairn.prompting import load_prompt, validate_prompt_group
+from slime_cairn.domain.context import ContextCapsule, ContextManifest
+from slime_cairn.workers.execution import CommandExecution
+from slime_cairn.domain.models import Fact, Intent, IntentProposal
+from slime_cairn.workers.native import NativeAgentConfig, NativeAgentMind
+from slime_cairn.protocol.prompting import load_prompt, validate_prompt_group
 
 
 class ContractBackend:

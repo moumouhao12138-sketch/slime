@@ -30,10 +30,8 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 slime = "slime_cairn.cli:main"
-slime-cairn-api = "slime_cairn.api:main"
-slime-cairn-service = "slime_cairn.service_main:main"
-slime-cairn-doctor = "slime_cairn.diagnostics:main"
-slime-cairn-e2e = "slime_cairn.e2e:main"
+slime-cairn-api = "slime_cairn.server.api:main"
+slime-cairn-service = "slime_cairn.dispatcher.main:main"
 
 [build-system]
 requires = ["hatchling"]

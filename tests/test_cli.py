@@ -1,289 +1,379 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr, redirect_stdout
+import io
+import json
 import os
-from pathlib import Path
-import subprocess
-import sys
-import tempfile
+import socket
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError, URLError
 
-from slime_cairn.cli import RuntimeContext, SlimeCli, _read_env_file, build_parser
+from slime_cairn.cli import (
+    ApiClient,
+    CliError,
+    COMMANDS,
+    DEFAULT_API_URL,
+    SlimeCli,
+    build_parser,
+    main,
+)
+
+
+class FakeApiClient:
+    def __init__(self, responses: dict[tuple[str, str], dict] | None = None) -> None:
+        self.responses = responses or {}
+        self.calls: list[tuple[str, str, dict | None]] = []
+
+    def request(self, method: str, path: str, payload: dict | None = None) -> dict:
+        key = (method, path)
+        self.calls.append((method, path, payload))
+        if key not in self.responses:
+            raise AssertionError(f"unexpected API request: {key}")
+        return self.responses[key]
 
 
 class CliTests(unittest.TestCase):
     @staticmethod
-    def _temporary_context(root: Path) -> RuntimeContext:
-        runs = root / "runs"
-        return RuntimeContext(
-            root=root,
-            config=root / "dispatch.cairn.native.json",
-            database=runs / "slime-server.db",
-            workspaces=runs / "slime-workspaces",
-            runs=runs,
-            service_dir=runs / "service",
-            state_file=runs / "service" / "state.json",
-            profile="raw-network",
-            docker_binary="docker",
-            lab_network="slime-cairn-lab",
-            bind_host="127.0.0.1",
-            port=8000,
-        )
+    def args(*values: str):
+        return build_parser().parse_args(list(values))
 
-    def test_parser_accepts_legacy_single_dash_and_posix_long_options(self):
-        parser = build_parser()
+    @staticmethod
+    def run_cli(args, client: FakeApiClient) -> str:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            result = SlimeCli(args, client).run()
+        if result != 0:
+            raise AssertionError(f"unexpected exit code: {result}")
+        return output.getvalue()
 
-        legacy = parser.parse_args(["new", "-Name", "fixture", "-Target", "fixture.local"])
-        modern = parser.parse_args(["new", "--name", "fixture", "--target", "fixture.local"])
-
-        self.assertEqual(legacy.name, modern.name)
-        self.assertEqual(legacy.target, modern.target)
-
-    def test_parser_exposes_one_command_setup_and_worker_rebuild(self):
-        args = build_parser().parse_args(["setup", "--rebuild-worker"])
-
-        self.assertEqual(args.command, "setup")
-        self.assertTrue(args.rebuild_worker)
-
-    def test_runtime_environment_loads_dotenv_without_overriding_host(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / ".env").write_text(
-                "SLIME_LLM_MODEL=file-model\nSLIME_LLM_API_KEY='file-key'\n",
-                encoding="utf-8",
-            )
-            context = self._temporary_context(root)
-
-            with patch.dict("os.environ", {"SLIME_LLM_MODEL": "host-model"}, clear=False):
-                environment = context.environment()
-
-            self.assertEqual(environment["SLIME_LLM_MODEL"], "host-model")
-            self.assertEqual(environment["SLIME_LLM_API_KEY"], "file-key")
-            self.assertEqual(_read_env_file(root / ".env")["SLIME_LLM_API_KEY"], "file-key")
-
-    def test_prepare_runtime_creates_env_then_prepares_dependencies_and_docker(self):
-        root = Path(__file__).parents[1]
-        args = build_parser().parse_args(["setup", "--project-root", str(root)])
-        cli = SlimeCli(args, RuntimeContext.from_args(args))
-
-        with (
-            patch.object(cli, "_ensure_env_file", return_value=True) as ensure_env,
-            patch.object(cli, "_validate_model_configuration") as validate,
-            patch.object(cli, "_ensure_python_dependencies") as dependencies,
-            patch.object(cli, "_ensure_docker_engine", return_value="docker") as engine,
-            patch.object(cli, "_ensure_worker_image") as image,
-            patch.object(cli, "_ensure_lab_network") as network,
-        ):
-            created = cli._prepare_runtime(require_model_configuration=True)
-
-        self.assertTrue(created)
-        ensure_env.assert_called_once_with()
-        validate.assert_called_once_with()
-        dependencies.assert_called_once_with()
-        engine.assert_called_once_with()
-        image.assert_called_once_with("docker")
-        network.assert_called_once_with("docker")
-
-    def test_first_setup_copies_env_template(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            (root / ".env.example").write_text("SLIME_LLM_MODEL=model\n", encoding="utf-8")
-            args = build_parser().parse_args(["setup"])
-            cli = SlimeCli(args, self._temporary_context(root))
-
-            self.assertTrue(cli._ensure_env_file())
-            self.assertEqual(
-                (root / ".env").read_text(encoding="utf-8"),
-                "SLIME_LLM_MODEL=model\n",
-            )
-            self.assertFalse(cli._ensure_env_file())
-
-    def test_model_configuration_rejects_example_placeholders(self):
-        root = Path(__file__).parents[1]
-        args = build_parser().parse_args(["setup", "--project-root", str(root)])
-        cli = SlimeCli(args, RuntimeContext.from_args(args))
-        environment = {
-            "SLIME_LLM_BASE_URL": "https://api.example.com/v1",
-            "SLIME_LLM_API_KEY": "replace-with-a-low-privilege-key",
-            "SLIME_LLM_MODEL": "replace-with-model-name",
-        }
-
-        with patch.object(RuntimeContext, "environment", return_value=environment):
-            with self.assertRaisesRegex(RuntimeError, "Model configuration is incomplete"):
-                cli._validate_model_configuration()
-
-    def test_up_dry_run_does_not_create_runtime_directories(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            args = build_parser().parse_args(["up", "--dry-run"])
-            cli = SlimeCli(args, self._temporary_context(root))
-
-            with patch.object(cli, "_prepare_runtime"):
-                cli.up()
-
-            self.assertFalse((root / "runs").exists())
-
-    def test_profile_block_is_removed_without_touching_surrounding_content(self):
-        profile = (
-            "export EDITOR=vim\n"
-            "# >>> slime-cairn PATH >>>\n"
-            "export PATH=\"$HOME/.local/bin:$PATH\"\n"
-            "# <<< slime-cairn PATH <<<\n"
-            "export LANG=C.UTF-8\n"
-        )
-
+    def test_parser_exposes_only_api_client_commands(self):
         self.assertEqual(
-            SlimeCli._without_profile_block(profile),
-            "export EDITOR=vim\nexport LANG=C.UTF-8\n",
-        )
-
-    def test_posix_install_and_uninstall_touch_only_managed_user_files(self):
-        root = Path(__file__).parents[1]
-        parser = build_parser()
-        install_args = parser.parse_args(
-            ["install", "--project-root", str(root)]
-        )
-        uninstall_args = parser.parse_args(
-            ["uninstall", "--project-root", str(root)]
-        )
-        context = RuntimeContext.from_args(install_args)
-
-        with tempfile.TemporaryDirectory() as temporary:
-            home = Path(temporary)
-            with (
-                patch("slime_cairn.cli._is_windows", return_value=False),
-                patch("slime_cairn.cli.Path.home", return_value=home),
-                patch.dict("os.environ", {"PATH": "C:\\Windows"}, clear=False),
-            ):
-                SlimeCli(install_args, context).install()
-                launcher = home / ".local" / "bin" / "slime"
-                profile = home / ".profile"
-                self.assertTrue(launcher.exists())
-                self.assertIn("Managed by Slime Cairn CLI", launcher.read_text(encoding="utf-8"))
-                self.assertIn("slime-cairn PATH", profile.read_text(encoding="utf-8"))
-
-                SlimeCli(uninstall_args, context).uninstall()
-                self.assertFalse(launcher.exists())
-                self.assertNotIn("slime-cairn PATH", profile.read_text(encoding="utf-8"))
-
-    def test_windows_install_and_uninstall_update_only_project_bin(self):
-        root = Path(__file__).parents[1]
-        parser = build_parser()
-        install_args = parser.parse_args(["install", "--project-root", str(root)])
-        uninstall_args = parser.parse_args(["uninstall", "--project-root", str(root)])
-        context = RuntimeContext.from_args(install_args)
-        command_dir = str((root / "bin").resolve())
-
-        with (
-            patch("slime_cairn.cli._is_windows", return_value=True),
-            patch.object(SlimeCli, "_read_windows_user_path", return_value=r"C:\\Tools"),
-            patch.object(SlimeCli, "_write_windows_user_path") as write_path,
-        ):
-            SlimeCli(install_args, context).install()
-            write_path.assert_called_once_with(rf"C:\\Tools;{command_dir}")
-
-        with (
-            patch("slime_cairn.cli._is_windows", return_value=True),
-            patch.object(
-                SlimeCli,
-                "_read_windows_user_path",
-                return_value=rf"C:\\Tools;{command_dir};D:\\Other",
+            COMMANDS,
+            (
+                "help",
+                "new",
+                "list",
+                "status",
+                "runtime",
+                "pause",
+                "stop",
+                "resume",
+                "delete",
+                "retry",
             ),
-            patch.object(SlimeCli, "_write_windows_user_path") as write_path,
+        )
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            build_parser().parse_args(["up"])
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_parser_keeps_windows_and_posix_option_spellings(self):
+        legacy = self.args(
+            "retry",
+            "-Name",
+            "fixture",
+            "-IntentId",
+            "intent-1",
+            "-BaseUrl",
+            "http://api:9000",
+        )
+        modern = self.args(
+            "retry",
+            "--name",
+            "fixture",
+            "--intent-id",
+            "intent-1",
+            "--base-url",
+            "http://api:9000",
+        )
+        self.assertEqual(legacy.name, modern.name)
+        self.assertEqual(legacy.intent_id, modern.intent_id)
+        self.assertEqual(legacy.base_url, modern.base_url)
+
+    def test_base_url_uses_environment_then_explicit_option(self):
+        with patch.dict(os.environ, {"SLIME_API_URL": "http://api:8080"}):
+            from_environment = build_parser().parse_args(["list"])
+            explicit = build_parser().parse_args(
+                ["list", "--base-url", "https://other.example/api/"]
+            )
+        self.assertEqual(from_environment.base_url, "http://api:8080")
+        self.assertEqual(explicit.base_url, "https://other.example/api/")
+        self.assertEqual(
+            build_parser().parse_args(["list"]).base_url,
+            os.environ.get("SLIME_API_URL", DEFAULT_API_URL),
+        )
+
+    def test_api_client_sends_json_with_configured_timeout(self):
+        response = MagicMock()
+        response.read.return_value = b'{"ok": true}'
+        response.__enter__.return_value = response
+        with patch("slime_cairn.cli.urlopen", return_value=response) as open_url:
+            result = ApiClient("http://api:8080/", 2.5).request(
+                "POST", "projects", {"name": "fixture"}
+            )
+
+        self.assertEqual(result, {"ok": True})
+        request = open_url.call_args.args[0]
+        self.assertEqual(request.full_url, "http://api:8080/projects")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(json.loads(request.data), {"name": "fixture"})
+        self.assertEqual(open_url.call_args.kwargs["timeout"], 2.5)
+
+    def test_api_client_reports_fastapi_error_detail(self):
+        error = HTTPError(
+            "http://api/projects",
+            409,
+            "Conflict",
+            None,
+            io.BytesIO(b'{"detail":"project is deleting"}'),
+        )
+        with patch("slime_cairn.cli.urlopen", side_effect=error):
+            with self.assertRaisesRegex(
+                CliError, r"API DELETE /projects/p1 failed \(409\): project is deleting"
+            ):
+                ApiClient("http://api").request("DELETE", "/projects/p1")
+
+    def test_api_client_reports_timeout_and_connection_errors(self):
+        with patch(
+            "slime_cairn.cli.urlopen", side_effect=URLError(socket.timeout("late"))
         ):
-            SlimeCli(uninstall_args, context).uninstall()
-            write_path.assert_called_once_with(r"C:\\Tools;D:\\Other")
+            with self.assertRaisesRegex(CliError, "timed out after 3s"):
+                ApiClient("http://api", 3).request("GET", "/projects")
 
-    @unittest.skipIf(os.name == "nt", "POSIX process-group integration test")
-    def test_posix_background_process_group_is_stopped_from_state(self):
-        root = Path(__file__).parents[1]
-        args = build_parser().parse_args(["help", "--project-root", str(root)])
-        context = RuntimeContext.from_args(args)
-        cli = SlimeCli(args, context)
+        with patch(
+            "slime_cairn.cli.urlopen", side_effect=URLError("connection refused")
+        ):
+            with self.assertRaisesRegex(CliError, "docker compose is running"):
+                ApiClient("http://api").request("GET", "/projects")
 
-        with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary) / "out.log"
-            error = Path(temporary) / "err.log"
-            pid, pgid = cli._spawn_background(
-                [
-                    sys.executable,
-                    "-c",
-                    "import time; time.sleep(30)",
-                    "slime_cairn.service_main",
-                ],
-                output,
-                error,
-                context.environment(),
-            )
-            self.assertTrue(cli._pid_alive(pid))
+    def test_api_client_rejects_invalid_url_and_non_json_response(self):
+        with self.assertRaisesRegex(CliError, "Invalid API URL"):
+            ApiClient("localhost:8000")
 
-            cli._stop_named_process(
-                {"dispatcher_pid": pid, "dispatcher_pgid": pgid},
-                "dispatcher",
-            )
+        response = MagicMock()
+        response.read.return_value = b"not json"
+        response.__enter__.return_value = response
+        with patch("slime_cairn.cli.urlopen", return_value=response):
+            with self.assertRaisesRegex(CliError, "returned invalid JSON"):
+                ApiClient("http://api").request("GET", "/projects")
 
-            self.assertFalse(cli._pid_alive(pid))
+    def test_new_creates_project_with_growth_or_direct_start_mode(self):
+        for mode, bootstrap_enabled in (("growth", False), ("direct", True)):
+            with self.subTest(mode=mode):
+                client = FakeApiClient(
+                    {
+                        ("POST", "/projects"): {
+                            "project": {
+                                "id": "project-1",
+                                "name": "fixture",
+                                "target": "https://target.example/",
+                                "status": "running",
+                            }
+                        }
+                    }
+                )
+                output = self.run_cli(
+                    self.args(
+                        "new",
+                        "--name",
+                        "fixture",
+                        "--target",
+                        "https://target.example/",
+                        "--goal",
+                        "Finish the task",
+                        "--start-mode",
+                        mode,
+                    ),
+                    client,
+                )
+                payload = client.calls[0][2]
+                self.assertEqual(payload["bootstrap_enabled"], bootstrap_enabled)
+                self.assertEqual(payload["allowed_targets"], ["https://target.example/"])
+                self.assertIn("Project created: fixture", output)
 
-    @unittest.skipUnless(os.name == "nt", "Windows PID probe regression test")
-    def test_windows_pid_probe_uses_tasklist(self):
-        completed = subprocess.CompletedProcess(
-            ["tasklist"],
-            0,
-            stdout='"python.exe","4242","Console","1","12,345 K"\r\n',
-            stderr="",
+    def test_list_prints_projects_from_api(self):
+        client = FakeApiClient(
+            {
+                ("GET", "/projects"): {
+                    "projects": [
+                        {
+                            "id": "project-1",
+                            "name": "fixture",
+                            "target": "target.example",
+                            "status": "running",
+                        }
+                    ]
+                }
+            }
         )
-        with patch("slime_cairn.cli.subprocess.run", return_value=completed) as run:
-            self.assertTrue(SlimeCli._pid_alive(4242))
-            self.assertFalse(SlimeCli._pid_alive(4243))
-        run.assert_any_call(
-            ["tasklist", "/FI", "PID eq 4242", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            text=True,
-            check=False,
+        output = self.run_cli(self.args("list"), client)
+        self.assertIn("STATUS", output)
+        self.assertIn("fixture", output)
+        self.assertEqual(client.calls, [("GET", "/projects", None)])
+
+    def test_status_resolves_latest_name_and_reads_view(self):
+        client = FakeApiClient(
+            {
+                ("GET", "/projects"): {
+                    "projects": [
+                        {"id": "old", "name": "fixture", "created_at": 1},
+                        {"id": "new/id", "name": "fixture", "created_at": 2},
+                    ]
+                },
+                ("GET", "/projects/new%2Fid/view"): {
+                    "project": {
+                        "id": "new/id",
+                        "name": "fixture",
+                        "target": "target.example",
+                        "status": "running",
+                    },
+                    "facts": [{"id": "fact-1"}],
+                    "summary": {
+                        "fact_count": 1,
+                        "intent_status": {"failed": 1, "pending": 2},
+                        "active_lease_count": 0,
+                        "retry_waiting_count": 1,
+                    },
+                    "active_completion": {"description": "Final result"},
+                },
+            }
+        )
+        output = self.run_cli(self.args("status", "--name", "fixture"), client)
+
+        self.assertIn("Facts:           1", output)
+        self.assertIn("failed=1, pending=2", output)
+        self.assertIn("Result:          Final result", output)
+        self.assertEqual(
+            client.calls,
+            [
+                ("GET", "/projects", None),
+                ("GET", "/projects/new%2Fid/view", None),
+            ],
         )
 
-    @unittest.skipUnless(os.name == "nt", "Windows launcher integration test")
-    def test_windows_launcher_forwards_help_without_starting_services(self):
-        root = Path(__file__).parents[1]
-        completed = subprocess.run(
-            ["cmd.exe", "/d", "/c", "slime.cmd", "help"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
+    def test_status_json_is_a_concise_projection(self):
+        client = FakeApiClient(
+            {
+                ("GET", "/projects"): {
+                    "projects": [{"id": "p1", "name": "fixture"}]
+                },
+                ("GET", "/projects/p1/view"): {
+                    "project": {
+                        "id": "p1",
+                        "name": "fixture",
+                        "target": "target.example",
+                        "status": "stopped",
+                    },
+                    "summary": {"fact_count": 7, "intent_status": {"done": 3}},
+                    "worker_runs": [{"large": "record"}],
+                    "active_completion": None,
+                },
+            }
+        )
+        output = self.run_cli(
+            self.args("status", "--name", "fixture", "--json"), client
+        )
+        payload = json.loads(output)
+        self.assertEqual(payload["fact_count"], 7)
+        self.assertEqual(payload["intent_status"], {"done": 3})
+        self.assertNotIn("worker_runs", payload)
+
+    def test_runtime_reads_runtime_endpoint(self):
+        client = FakeApiClient(
+            {
+                ("GET", "/projects"): {
+                    "projects": [{"id": "p1", "name": "fixture"}]
+                },
+                ("GET", "/projects/p1/runtime"): {
+                    "intent_status": {"running": 1}
+                },
+            }
+        )
+        output = self.run_cli(self.args("runtime", "--name", "fixture"), client)
+        self.assertEqual(json.loads(output), {"intent_status": {"running": 1}})
+
+    def test_pause_stop_and_resume_use_status_endpoint(self):
+        for command, expected in (
+            ("pause", "stopped"),
+            ("stop", "stopped"),
+            ("resume", "running"),
+        ):
+            with self.subTest(command=command):
+                client = FakeApiClient(
+                    {
+                        ("GET", "/projects"): {
+                            "projects": [{"id": "p1", "name": "fixture"}]
+                        },
+                        ("PUT", "/projects/p1/status"): {
+                            "project": {"name": "fixture", "status": expected}
+                        },
+                    }
+                )
+                output = self.run_cli(
+                    self.args(command, "--name", "fixture"), client
+                )
+                self.assertIn(f"fixture -> {expected}", output)
+                self.assertEqual(
+                    client.calls[-1],
+                    ("PUT", "/projects/p1/status", {"status": expected}),
+                )
+
+    def test_delete_uses_project_api(self):
+        client = FakeApiClient(
+            {
+                ("GET", "/projects"): {
+                    "projects": [{"id": "p1", "name": "fixture"}]
+                },
+                ("DELETE", "/projects/p1"): {"accepted": True},
+            }
+        )
+        output = self.run_cli(self.args("delete", "--name", "fixture"), client)
+        self.assertIn("Project deletion requested: fixture", output)
+
+    def test_retry_resolves_project_and_posts_encoded_intent(self):
+        client = FakeApiClient(
+            {
+                ("GET", "/projects"): {
+                    "projects": [{"id": "p1", "name": "fixture"}]
+                },
+                ("POST", "/projects/p1/intents/intent%2F1/retry"): {
+                    "retried": True,
+                    "intent": {"id": "intent/1", "status": "pending"},
+                },
+            }
+        )
+        output = self.run_cli(
+            self.args(
+                "retry",
+                "--name",
+                "fixture",
+                "--intent-id",
+                "intent/1",
+            ),
+            client,
+        )
+        self.assertIn("Intent queued for retry: intent/1", output)
+        self.assertEqual(
+            client.calls[-1],
+            ("POST", "/projects/p1/intents/intent%2F1/retry", None),
         )
 
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("Slime Cairn", completed.stdout)
+    def test_missing_project_and_intent_have_clear_errors(self):
+        client = FakeApiClient({("GET", "/projects"): {"projects": []}})
+        with self.assertRaisesRegex(CliError, "Project name not found: missing"):
+            SlimeCli(self.args("status", "--name", "missing"), client).run()
 
-        launcher = (root / "bin" / "slime.cmd").read_text(encoding="utf-8")
-        self.assertIn("slime_cairn.cli", launcher)
-        self.assertNotIn("powershell", launcher.lower())
+        with self.assertRaisesRegex(CliError, "Intent ID .* is required"):
+            SlimeCli(self.args("retry", "--name", "fixture"), client).run()
 
-    @unittest.skipUnless(os.name == "nt", "Windows launcher integration test")
-    def test_windows_launcher_install_dry_run_does_not_change_user_path(self):
-        import winreg
-
-        def user_path() -> str:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
-                return str(winreg.QueryValueEx(key, "Path")[0])
-
-        root = Path(__file__).parents[1]
-        before = user_path()
-        completed = subprocess.run(
-            ["cmd.exe", "/d", "/c", "slime.cmd", "install", "-DryRun"],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertTrue(
-            "Would add to the current user PATH" in completed.stdout
-            or "already installed" in completed.stdout
-        )
-        self.assertEqual(user_path(), before)
+    def test_main_prints_help_without_contacting_api(self):
+        output = io.StringIO()
+        with redirect_stdout(output), patch(
+            "slime_cairn.cli.ApiClient", side_effect=AssertionError("must not connect")
+        ):
+            main(["help"])
+        self.assertIn("Manage Slime projects", output.getvalue())
+        self.assertIn("retry", output.getvalue())
 
 
 if __name__ == "__main__":

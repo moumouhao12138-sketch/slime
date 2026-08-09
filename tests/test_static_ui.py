@@ -8,7 +8,9 @@ import tempfile
 import unittest
 
 
-STATIC_UI_PATH = Path(__file__).parents[1] / "src" / "slime_cairn" / "static" / "index.html"
+STATIC_UI_PATH = (
+    Path(__file__).parents[1] / "src" / "slime_cairn" / "server" / "static" / "index.html"
+)
 
 
 class StaticUiTests(unittest.TestCase):

@@ -6,7 +6,7 @@ from unittest.mock import patch
 from urllib.error import HTTPError
 
 from slime_cairn import __version__
-from slime_cairn.model_health import ModelEndpoint
+from slime_cairn.workers.health import ModelEndpoint
 
 
 class _Response:
@@ -34,7 +34,7 @@ class _Opener:
 class ModelEndpointTests(unittest.TestCase):
     def test_openai_responses_probe_uses_expected_request_without_exposing_key(self):
         endpoint = ModelEndpoint("https://models.example/v1", "super-secret", "openai-responses")
-        with patch("slime_cairn.model_health.urlopen", return_value=_Response()) as request:
+        with patch("slime_cairn.workers.health.urlopen", return_value=_Response()) as request:
             result = endpoint.probe("model-a", 3)
 
         self.assertTrue(result["healthy"])
@@ -55,7 +55,7 @@ class ModelEndpointTests(unittest.TestCase):
             hdrs=None,
             fp=BytesIO(b'{"error":"invalid credential"}'),
         )
-        with patch("slime_cairn.model_health.urlopen", side_effect=failure):
+        with patch("slime_cairn.workers.health.urlopen", side_effect=failure):
             result = endpoint.probe("model-a", 3)
 
         self.assertFalse(result["healthy"])
@@ -65,7 +65,7 @@ class ModelEndpointTests(unittest.TestCase):
 
     def test_anthropic_probe_uses_messages_protocol(self):
         endpoint = ModelEndpoint("https://models.example", "secret", "anthropic-messages")
-        with patch("slime_cairn.model_health.urlopen", return_value=_Response()) as request:
+        with patch("slime_cairn.workers.health.urlopen", return_value=_Response()) as request:
             result = endpoint.probe("claude-fixture", 3)
 
         self.assertTrue(result["healthy"])
@@ -80,7 +80,7 @@ class ModelEndpointTests(unittest.TestCase):
             "secret",
             "openai-chat-completions",
         )
-        with patch("slime_cairn.model_health.urlopen", return_value=_Response()) as request:
+        with patch("slime_cairn.workers.health.urlopen", return_value=_Response()) as request:
             result = endpoint.probe("model-chat", 3)
 
         self.assertTrue(result["healthy"])
@@ -92,7 +92,7 @@ class ModelEndpointTests(unittest.TestCase):
     def test_probe_uses_the_worker_proxy_environment(self):
         endpoint = ModelEndpoint("https://models.example/v1", "secret", "openai-responses")
         opener = _Opener()
-        with patch("slime_cairn.model_health.build_opener", return_value=opener) as build:
+        with patch("slime_cairn.workers.health.build_opener", return_value=opener) as build:
             result = endpoint.probe(
                 "model-a",
                 3,

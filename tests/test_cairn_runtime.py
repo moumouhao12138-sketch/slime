@@ -5,13 +5,13 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.execution import CommandExecution
-from slime_cairn.models import CompletionProposal, FactCandidate, IntentProposal, PseudopodReport, WorkerTask
-from slime_cairn.native_agent import NativeAgentConfig, NativeAgentMind
-from slime_cairn.scheduler import Scheduler
-from slime_cairn.service import ProjectRuntimeBinding
-from slime_cairn.workspace import IsolatedWorkspace
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.workers.execution import CommandExecution
+from slime_cairn.domain.models import CompletionProposal, FactCandidate, IntentProposal, PseudopodReport, WorkerTask
+from slime_cairn.workers.native import NativeAgentConfig, NativeAgentMind
+from slime_cairn.dispatcher.scheduler import Scheduler
+from slime_cairn.dispatcher.service import ProjectRuntimeBinding
+from slime_cairn.domain.workspace import IsolatedWorkspace
 
 
 class FakeNativeBackend:

@@ -6,12 +6,12 @@ import unittest
 
 import yaml
 
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.context import ContextBuilder
-from slime_cairn.models import IntentProposal
-from slime_cairn.scheduler import Scheduler
-from slime_cairn.seeding import seed_project_context_facts
-from slime_cairn.workspace import IsolatedWorkspace
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.domain.context import ContextBuilder
+from slime_cairn.domain.models import IntentProposal
+from slime_cairn.dispatcher.scheduler import Scheduler
+from slime_cairn.domain.seeding import seed_project_context_facts
+from slime_cairn.domain.workspace import IsolatedWorkspace
 
 
 class CairnGraphSnapshotTests(unittest.TestCase):

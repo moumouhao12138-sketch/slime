@@ -9,13 +9,13 @@ import time
 import unittest
 from unittest.mock import patch
 
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.context import ContextCapsule, ContextManifest
-from slime_cairn.errors import ModelInvocationCancelled
-from slime_cairn.execution import CommandExecution, DockerExecProcess, PersistentDockerBackend, PersistentDockerConfig
-from slime_cairn.models import Intent, WorkerTask
-from slime_cairn.native_agent import NativeAgentConfig, NativeAgentMind
-from slime_cairn.runtime_factory import DockerCairnRuntimeFactory
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.domain.context import ContextCapsule, ContextManifest
+from slime_cairn.workers.errors import ModelInvocationCancelled
+from slime_cairn.workers.execution import CommandExecution, DockerExecProcess, PersistentDockerBackend, PersistentDockerConfig
+from slime_cairn.domain.models import Intent, WorkerTask
+from slime_cairn.workers.native import NativeAgentConfig, NativeAgentMind
+from slime_cairn.workers.factory import DockerCairnRuntimeFactory
 
 
 class FakePopen:
@@ -161,7 +161,7 @@ class NativeCancellationTests(unittest.TestCase):
                 env_path=None,
                 pid_path=pid_path,
             )
-            with patch("slime_cairn.execution.subprocess.run", side_effect=control_run):
+            with patch("slime_cairn.workers.execution.subprocess.run", side_effect=control_run):
                 self.assertTrue(handle.cancel("project_stopped"))
                 deadline = time.monotonic() + 2
                 while not calls and time.monotonic() < deadline:
@@ -193,7 +193,7 @@ class NativeCancellationTests(unittest.TestCase):
                 seen["argv"] = list(argv)
                 return fake
 
-            with patch("slime_cairn.execution.subprocess.Popen", side_effect=fake_popen):
+            with patch("slime_cairn.workers.execution.subprocess.Popen", side_effect=fake_popen):
                 handle = backend.start_with_environment(
                     ["codex", "exec", "task"],
                     root,

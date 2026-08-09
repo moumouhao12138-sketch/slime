@@ -4,12 +4,12 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from slime_cairn.blackboard import Blackboard
-from slime_cairn.context import ContextBuilder
-from slime_cairn.models import FactCandidate, IntentProposal
-from slime_cairn.scheduler import Scheduler
-from slime_cairn.seeding import seed_project_context_facts
-from slime_cairn.slime_layer import SlimeGrowthLayer
+from slime_cairn.server.blackboard import Blackboard
+from slime_cairn.domain.context import ContextBuilder
+from slime_cairn.domain.models import FactCandidate, IntentProposal
+from slime_cairn.dispatcher.scheduler import Scheduler
+from slime_cairn.domain.seeding import seed_project_context_facts
+from slime_cairn.domain.growth import SlimeGrowthLayer
 
 
 class BranchContinuityTests(unittest.TestCase):
