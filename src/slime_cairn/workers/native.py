@@ -166,9 +166,8 @@ class NativeSessionState:
     port_range: tuple[int, int]
     turns: int = 0
     resumed: bool = False
-    # ``resumed`` records whether this task started from a persisted session.
-    # ``resume_session`` controls the next CLI invocation and becomes true only
-    # after this process has a session identifier the CLI can actually resume.
+    # Sessions are task-scoped. ``resume_session`` becomes true only after the
+    # execute phase reports an ID that this task's conclude phase can resume.
     resume_session: bool = False
     resume_allowed: bool = True
     status: str = "active"
@@ -210,7 +209,6 @@ class NativeAgentMind:
 
     execution_mode = "native-agent"
     cairn_native_runner = True
-    recoverable_statuses = frozenset({"active", "failed", "interrupted"})
     _resource_lock = threading.RLock()
     _active_port_blocks: dict[str, dict[int, str]] = {}
 
@@ -384,6 +382,8 @@ class NativeAgentMind:
                 "project_id": state.project_id,
                 "intent_id": state.intent_id,
                 "mode": state.mode,
+                "session_scope": "task",
+                "resume_policy": "same_task_conclude_only",
                 "session_id": state.session_id,
                 "directory": state.directory.relative_to(state.workspace_root).as_posix(),
                 "container_directory": state.container_directory,
@@ -429,40 +429,9 @@ class NativeAgentMind:
             if not blocks:
                 cls._active_port_blocks.pop(project_id, None)
 
-    def _manifest_has_invalid_resume(self, manifest: dict[str, Any]) -> bool:
-        """Recognize old session records that a native CLI has rejected.
-
-        The per-pod manifest long outlives a CLI process.  When a provider has
-        discarded a remote thread, retrying ``resume`` with the same ID creates
-        a permanent failure loop.  Keep this narrowly scoped to each CLI's
-        explicit missing-session diagnostics so ordinary task failures can
-        still retain their conversation.
-        """
-
-        detail = "\n".join(
-            (
-                str(manifest.get("last_error", "")),
-                json.dumps(manifest.get("fallback") or {}, ensure_ascii=False),
-            )
-        ).lower()
-        markers = {
-            "codex-cli": (
-                "thread/resume failed",
-                "no rollout found for thread id",
-            ),
-            "claude-code": (
-                "failed to resume",
-                "session not found",
-                "conversation not found",
-                "could not find session",
-            ),
-            "pi-cli": ("no session found matching",),
-        }
-        return any(marker in detail for marker in markers[self.config.adapter])
-
     @staticmethod
     def _mark_session_unusable(state: NativeSessionState) -> None:
-        """Force the next dispatcher retry to create a new CLI session."""
+        """Prevent this task's conclude phase from resuming its CLI session."""
 
         state.resume_allowed = False
         state.resume_session = False
@@ -507,16 +476,17 @@ class NativeAgentMind:
             prepare_writable_path(directory)
 
         manifest = self._read_json(self._manifest_path(directory))
+        # Cairn scopes a native CLI session to one dispatched task.  The
+        # workspace and its audit records survive retries, but a later task
+        # must never inherit the previous task's model context.  Count prior
+        # transcripts so failed attempts also receive monotonic artifact IDs.
         prior_turns = int(manifest.get("turns", 0) or 0)
-        resumable = (
-            manifest.get("adapter") == self.config.adapter
-            and manifest.get("worker_name") == self.config.worker_name
-            and manifest.get("status") in self.recoverable_statuses
-            and prior_turns > 0
-            and bool(manifest.get("session_id"))
-            and manifest.get("resume_allowed") is not False
-            and not self._manifest_has_invalid_resume(manifest)
+        transcript_dir = directory / "transcripts"
+        prior_transcripts = sum(
+            1 for item in transcript_dir.glob("turn-*.json") if item.is_file()
         )
+        prior_turns = max(prior_turns, prior_transcripts)
+        task_session_id = str(uuid4())
         container_directory = str(PurePosixPath("/workspace", *relative.parts))
         resource_token = f"{intent.project_id}:{self.config.worker_name}:{task.mode}:{intent.id}"
         port_range = self._reserve_port_range(intent.project_id, resource_token)
@@ -525,7 +495,7 @@ class NativeAgentMind:
                 project_id=intent.project_id,
                 intent_id=intent.id,
                 mode=task.mode,
-                session_id=str(manifest.get("session_id")) if resumable else str(uuid4()),
+                session_id=task_session_id,
                 workspace_root=workspace_root,
                 directory=directory,
                 container_directory=container_directory,
@@ -535,13 +505,13 @@ class NativeAgentMind:
                 # Keep artifact numbering monotonic even after a rejected
                 # session is replaced by a fresh native CLI session.
                 turns=prior_turns,
-                resumed=resumable,
-                resume_session=resumable,
+                resumed=False,
+                resume_session=False,
                 status="active",
-                started_at=float(manifest.get("started_at", time.time())) if resumable else time.time(),
-                transcript_refs=[str(item) for item in manifest.get("transcript_refs", [])] if resumable else [],
-                fallback=dict(manifest.get("fallback") or {}) if resumable else {},
-                command_count=int(manifest.get("command_count", 0) or 0) if resumable else 0,
+                started_at=time.time(),
+                transcript_refs=[],
+                fallback={},
+                command_count=0,
             )
             self._local.state = state
             self._write_manifest(state)
@@ -557,6 +527,11 @@ class NativeAgentMind:
     def end_session(self, outcome: str = "completed") -> dict[str, Any]:
         state = self._state()
         state.status = outcome or "completed"
+        # Once the dispatched task leaves this process, its session is audit
+        # data only. A later dispatch creates a new session regardless of the
+        # outcome, so persisted manifests must not advertise resume eligibility.
+        state.resume_allowed = False
+        state.resume_session = False
         try:
             self._write_manifest(state)
             return self.session_info()
@@ -570,11 +545,13 @@ class NativeAgentMind:
             "execution": self.execution_mode,
             "adapter": f"native-{self.config.adapter}",
             "worker_name": self.config.worker_name,
+            "session_scope": "task",
+            "resume_policy": "same_task_conclude_only",
             "session_id": state.session_id,
             "turns": state.turns,
             "resumed": state.resumed,
             "resume_allowed": state.resume_allowed,
-            "recoverable": True,
+            "recoverable": False,
             "status": state.status,
             "manifest": str(self._manifest_path(state.directory)),
             "pod_directory": state.directory.relative_to(state.workspace_root).as_posix(),

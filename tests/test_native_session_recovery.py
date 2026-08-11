@@ -242,6 +242,68 @@ class NativeSessionRecoveryTests(unittest.TestCase):
             finally:
                 mind.end_session("failed")
 
+    def test_new_dispatch_task_does_not_resume_previous_manifest_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+
+            def successful_turn(thread_id: str, description: str) -> CommandExecution:
+                payload = {
+                    "accepted": True,
+                    "data": {
+                        "fact": {"description": description},
+                        "complete": {"description": f"{description} complete"},
+                    },
+                }
+                stdout = "\n".join(
+                    (
+                        json.dumps({"type": "thread.started", "thread_id": thread_id}),
+                        json.dumps(
+                            {
+                                "type": "item.completed",
+                                "item": {
+                                    "type": "agent_message",
+                                    "text": json.dumps(payload),
+                                },
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "turn.completed",
+                                "usage": {"input_tokens": 5, "output_tokens": 3},
+                            }
+                        ),
+                    )
+                )
+                return CommandExecution(0, stdout, "")
+
+            backend = RecordingBackend(
+                root,
+                [
+                    successful_turn("task-session-one", "first task evidence"),
+                    successful_turn("task-session-two", "second task evidence"),
+                ],
+            )
+            mind = NativeAgentMind(
+                NativeAgentConfig("codex-native", "codex-cli", "codex"),
+                lambda project_id: backend,
+            )
+            _task, intent = task_and_intent("codex-native")
+
+            first = mind.run_cairn_task(intent, [], "bootstrap", capsule())
+            second = mind.run_cairn_task(intent, [], "bootstrap", capsule())
+
+            self.assertNotEqual(
+                first.model_session["session_id"], second.model_session["session_id"]
+            )
+            self.assertFalse(second.model_session["resumed"])
+            self.assertFalse(second.model_session["recoverable"])
+            self.assertEqual(second.model_session["session_scope"], "task")
+            self.assertEqual(
+                second.model_session["resume_policy"], "same_task_conclude_only"
+            )
+            self.assertEqual(len(backend.calls), 2)
+            self.assertTrue(all("resume" not in call for call in backend.calls))
+
     def test_explicit_missing_session_errors_start_fresh_for_all_native_clis(self):
         fixtures = (
             ("codex-cli", "codex", "thread/resume failed: no rollout found for thread id stale"),
