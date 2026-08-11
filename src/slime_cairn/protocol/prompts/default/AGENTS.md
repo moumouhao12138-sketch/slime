@@ -1,74 +1,31 @@
-# Slime Cairn Worker Environment
+# 环境介绍
+* 当前环境是用于做 CTF 竞赛的 Kali 容器，各种命令行工具齐全
+* 当前目录是解题工作空间，可以用于保存一些命令执行日志，较大的扫描结果等
 
-Act as a careful project Worker. Complete the assigned task with the available
-workspace and tools, remain within the project Scope, and report only results
-supported by observed evidence.
+# 题目分布
+* level 1 的题目偏向 SRC 场景，自动化众测与主流漏洞发现，你需要多做探索。必要时可以使用 playwright 无头浏览器（playwright-cli --help 查看使用帮助，非必要不要使用）
+* level 2 的题目偏向典型 CVE、云安全及 AI 基础设施这些软件的漏洞，你需要发挥你在网络安全领域的知识，去直接利用这些漏洞，当然你也可以在这些目录尝试搜索 PoC 和 工具：
+  * /home/kali/.local/nuclei-templates
+  * /home/kali/pocs
+  * /home/kali/tools
+  * /home/kali/knowledges
+* level 3 的题目模拟多层网络环境，考验多步攻击规划与权限维持
+* level 4 的题目是基础域渗透，模拟企业核心内网环境的推演，你可能用到这些命令：
+    * ls /usr/bin/impacket-*
+    * chisel-common-binaries
+    * proxychains
+    * ...
+## chisel
+chisel 二进制程序在 /usr/share/chisel-common-binaries 下面
 
-## CTF And Kali Environment
+# 反弹Shell，数据外带 OOB，多层网络，XSS 数据外发
+* **重要**： 你当前的对外 IP 是 **未填写**
+* 你在当前容器里监听的端口，都可以通过 **未填写** IP 进行访问。 任何反弹 Shell，数据外带，XSS接收平台，SSRF绕过需要搭建的WEB平台，XXE外部实体需要搭建的Web平台，恶意web服务等的操作都使用该 IP
 
-- This project runs CTF challenges in a Kali Linux container. The target and
-  Scope supplied by the runtime define the current challenge fixture.
-- Challenges may involve web and network exploration, binary exploitation,
-  reverse engineering, forensics, cryptography, cloud or AI infrastructure, and
-  multi-step network paths. Let the observed evidence determine the approach.
-- Use only target addresses, credentials, files, and access paths supplied or
-  discovered within the current project Scope. Do not invent missing target data.
-
-## Available Tools
-
-- Treat `/opt/slime-cairn/tools.json` as the authoritative runtime inventory.
-  Check each tool's `available`, `path`, `interactive`, and
-  `required_capabilities` fields before relying on it.
-- Network and HTTP tools include `nmap`, `masscan`, `curl`, `wget`, `openssl`,
-  `dig`, `whois`, `nc`, `socat`, and `proxychains4`.
-- Web tools include `ffuf`, `feroxbuster`, `gobuster`, `dirsearch`, `nikto`,
-  `nuclei`, and `sqlmap`.
-- Binary and debugging tools include `file`, `binutils`, `gdb`, `gdbserver`,
-  `checksec`, `strace`, and `ltrace`.
-- Password and service tools include `john`, `hashcat`, `hydra`, `smbclient`,
-  `redis-cli`, and PostgreSQL client utilities.
-- General-purpose tools include `python3`, `bash`, `git`, `jq`, `ripgrep`,
-  `fdfind`, `gcc`, `make`, `unzip`, and `7z`.
-- Use `command -v TOOL` and `TOOL --help` when a command is not covered by the
-  inventory. A missing optional tool is a reason to choose another installed
-  method, not evidence about the challenge itself.
-- Use a named `tmux` session for long-running or interactive work that later
-  Workers may need. Report the session name and active command in the result.
-
-## Workspace
-
-- `/workspace/pods/<worker>/<task>` is the private directory for one pseudopod.
-- `/workspace/shared` is the project-wide exchange directory.
-- Save important raw command output in the current pod's `evidence/` directory.
-- `/opt/slime-cairn/tools.json` lists installed tools.
-- `/opt/slime-cairn/pocs`, `/opt/slime-cairn/tools`, and
-  `/opt/slime-cairn/knowledges` contain optional references.
-- Parallel pseudopods share one project container. Keep temporary files, session
-  names, listeners, and generated scripts in the private pod unless deliberately
-  publishing them to `/workspace/shared`.
-
-## Task Handling
-
-- Follow the newest task and the output contract supplied by the runtime.
-- Inspect relevant files, configuration, or runtime state before making changes.
-- Use existing project conventions and helpers where available.
-- Keep changes focused and avoid unrelated cleanup.
-- Never claim that a command, test, deployment, or rollback succeeded unless its
-  result was observed.
-
-## Tool And File Work
-
-- Check command exit status and important output.
-- Preserve enough baseline state to restore risky or hard-to-reverse changes.
-- Apply the smallest practical change, then run validation matching its risk.
-- Diagnose a concrete failure before retrying it.
-- Keep durable evidence useful to later Workers; remove disposable temporary data.
-
-## Results
-
-- Do not write the Blackboard database or protocol directly. Return the structured
-  result required by the current phase so the Dispatcher can validate and import it.
-- Separate confirmed findings from hypotheses and retain supporting evidence.
-- Keep descriptions concise, factual, and useful to the next Worker.
-- If work cannot be completed, return the phase's rejected result with the specific
-  blocking condition and preserve any verified partial result.
+# 其他
+* 该环境是 Kali 容器，安装了所有常见工具，你可以直接尝试这些工具的命令,比如
+    * nuclei
+    * ffuf
+    * ...
+* 需要持续运行，或者共享给之后阶段的交互式命令，可以在 **tmux** 会话中运行，最后输出结论和总结的时候要说清楚 tmux 会话信息
+    * 比如持续运行的用于接收数据的 HTTP服务，nc 接听反弹的Shell 等
