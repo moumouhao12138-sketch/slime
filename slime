@@ -1,0 +1,60 @@
+#!/bin/sh
+set -eu
+
+PROJECT_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$PROJECT_ROOT"
+
+command=${1:-help}
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+
+case "$command" in
+    up)
+        if [ ! -f .env ]; then
+            cp .env.example .env
+            printf '%s\n' 'Created .env. Fill in the model provider values, then run ./slime up again.' >&2
+            exit 2
+        fi
+        exec docker compose up -d --remove-orphans "$@"
+        ;;
+    down|restart|logs|ps)
+        exec docker compose "$command" "$@"
+        ;;
+    pull|build)
+        exec docker compose "$command" "$@"
+        ;;
+    ui)
+        url="http://${SLIME_BIND_ADDRESS:-127.0.0.1}:${SLIME_PORT:-8000}/"
+        if command -v xdg-open >/dev/null 2>&1; then
+            exec xdg-open "$url"
+        elif command -v open >/dev/null 2>&1; then
+            exec open "$url"
+        fi
+        printf '%s\n' "$url"
+        ;;
+    shell)
+        exec docker compose exec api sh "$@"
+        ;;
+    help|-h|--help)
+        cat <<'EOF'
+Usage: ./slime COMMAND [ARGS...]
+
+Compose commands:
+  up       Start API and dispatcher in the background
+  down     Stop services and keep persistent data
+  restart  Restart running services
+  pull     Pull application and Worker images
+  build    Build application and Worker images locally
+  logs     Show service logs
+  ps       Show service status
+  ui       Open the local web interface
+  shell    Open a shell in the API container
+
+All other commands are passed to the Slime CLI in the API container.
+EOF
+        ;;
+    *)
+        exec docker compose exec -T api slime "$command" "$@"
+        ;;
+esac

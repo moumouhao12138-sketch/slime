@@ -1,0 +1,2339 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Slime Cairn</title>
+  <style>
+    :root {
+      --canvas: #f4f7f8;
+      --surface: #ffffff;
+      --line: #dce4e7;
+      --line-strong: #bfced2;
+      --ink: #172326;
+      --muted: #627176;
+      --faint: #8c9b9f;
+      --teal: #0f766e;
+      --teal-soft: #e4f3f0;
+      --blue: #2563eb;
+      --blue-soft: #e8f0ff;
+      --amber: #b45309;
+      --amber-soft: #fff2db;
+      --rose: #be123c;
+      --rose-soft: #fce8ee;
+      --violet: #6d28d9;
+      --violet-soft: #f1ebff;
+      --shadow: 0 10px 28px rgba(28, 47, 52, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--canvas);
+      color: var(--ink);
+      font-family: Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+    .hidden { display: none !important; }
+    .app {
+      height: 100%;
+      display: grid;
+      grid-template-rows: 56px minmax(0, 1fr);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 18px;
+      background: #173c40;
+      color: #f7fbfb;
+      border-bottom: 1px solid #0d2c30;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand-mark {
+      width: 25px;
+      height: 25px;
+      border: 2px solid #8be0ce;
+      border-radius: 50%;
+      position: relative;
+      flex: 0 0 auto;
+    }
+    .brand-mark::before, .brand-mark::after {
+      content: "";
+      position: absolute;
+      background: #8be0ce;
+      border-radius: 2px;
+    }
+    .brand-mark::before { width: 9px; height: 2px; right: -7px; top: 5px; transform: rotate(32deg); }
+    .brand-mark::after { width: 7px; height: 2px; left: -5px; bottom: 4px; transform: rotate(-38deg); }
+    .brand-title { font-size: 15px; font-weight: 700; white-space: nowrap; }
+    .brand-subtitle { color: #a8c4c6; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .topbar-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+    .connection { display: inline-flex; align-items: center; gap: 6px; color: #c0d8d9; font-size: 12px; }
+    .connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #d2a13b; }
+    .connection.online .connection-dot { background: #55c6a7; }
+
+    .button {
+      min-height: 32px;
+      padding: 6px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: var(--surface);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .button:hover { border-color: #78949a; background: #f8fbfb; }
+    .button:disabled { opacity: 0.5; cursor: wait; }
+    .button.topbar-button { color: #edf9f8; border-color: #4f777a; background: #244c50; }
+    .button.topbar-button:hover { background: #2f5b5f; }
+    .button.primary { border-color: #0f766e; background: var(--teal); color: #ffffff; }
+    .button.primary:hover { background: #0a625b; }
+    .button.warning { border-color: #d38a2e; background: #fff9f0; color: #934307; }
+    .button.critical { border-color: #d47a91; background: #fff7f9; color: var(--rose); }
+
+    .workbench {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 350px;
+      overflow: hidden;
+    }
+    .workbench.results-mode { grid-template-columns: 280px minmax(0, 1fr); }
+    .workbench.results-mode .inspector { display: none; }
+    .sidebar, .inspector {
+      min-height: 0;
+      background: var(--surface);
+      overflow: auto;
+    }
+    .sidebar { border-right: 1px solid var(--line); }
+    .inspector { border-left: 1px solid var(--line); }
+    .panel-heading {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-heading h2, .panel-heading h3 { margin: 0; font-size: 13px; font-weight: 750; }
+    .sidebar-heading-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .sidebar-heading-title .button { flex: 0 0 auto; }
+    .count-row { display: flex; gap: 8px; font-size: 11px; color: var(--muted); }
+    .count-row span { display: inline-flex; align-items: center; gap: 4px; }
+    .count-row strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+    .project-bulk-actions {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .project-select-all-label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+    .project-bulk-count { flex: 1 1 auto; min-width: 0; }
+    .project-bulk-actions .button { min-height: 28px; padding: 4px 8px; }
+    .project-list { display: grid; gap: 2px; padding: 8px; }
+    .project-entry { min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; }
+    .project-checkbox { width: 15px; height: 15px; margin: 0; accent-color: var(--teal); cursor: pointer; justify-self: center; }
+    .project-item {
+      width: 100%;
+      display: grid;
+      gap: 5px;
+      padding: 10px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .project-item:hover { background: #f2f7f7; }
+    .project-item.selected { border-color: #94c5bf; background: #eaf6f4; }
+    .project-item-line { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .project-item-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+    .project-item-target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+    .empty-list { padding: 20px 14px; color: var(--muted); font-size: 12px; }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      width: max-content;
+      min-height: 20px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 750;
+      text-transform: uppercase;
+      font-variant-numeric: tabular-nums;
+    }
+    .status.running { color: #0a625b; background: var(--teal-soft); }
+    .status.stopped { color: #984a0a; background: var(--amber-soft); }
+    .status.completed { color: #a11435; background: var(--rose-soft); }
+    .status.pending { color: #45585d; background: #edf2f3; }
+    .status.failed { color: #a11435; background: var(--rose-soft); }
+    .status.dormant { color: #4f3a8a; background: var(--violet-soft); }
+    .status.retry_wait { color: #1d4ed8; background: var(--blue-soft); }
+    .status.stale { color: #984a0a; background: var(--amber-soft); }
+    .status.unknown { color: #45585d; background: #edf2f3; }
+
+    .center {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 82px minmax(190px, 1fr) 236px;
+      background: var(--canvas);
+    }
+    .project-header {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+    .project-main { min-width: 0; }
+    .project-title-line { display: flex; align-items: center; min-width: 0; gap: 8px; }
+    .project-title { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 750; }
+    .project-target { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+    .project-actions { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+    .view-switch { display: inline-flex; align-items: center; padding: 2px; border: 1px solid var(--line-strong); border-radius: 6px; background: #edf2f3; }
+    .view-tab { min-height: 28px; padding: 4px 10px; border: 0; border-radius: 4px; background: transparent; color: #50656a; cursor: pointer; font-size: 11px; font-weight: 750; }
+    .view-tab[aria-selected="true"] { background: var(--surface); color: #0b625b; box-shadow: 0 1px 3px rgba(30, 52, 56, 0.12); }
+    .center.results-mode { grid-template-rows: 82px minmax(0, 1fr); }
+    .readable-view { min-height: 0; overflow: auto; padding: 18px clamp(14px, 3vw, 34px) 32px; background: #f7f9fa; }
+    .readable-inner { width: min(1040px, 100%); margin: 0 auto; display: grid; gap: 22px; }
+    .readable-empty { min-height: 260px; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+    .result-overview { display: grid; gap: 11px; padding: 16px 18px; border: 1px solid #a9d3cc; border-left: 4px solid var(--teal); border-radius: 6px; background: var(--surface); }
+    .result-overview.completed { border-color: #e3a8b7; border-left-color: var(--rose); }
+    .result-overview.completed .result-overview-title { color: #9f1239; }
+    .result-overview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .result-overview-title { margin: 0; font-size: 15px; font-weight: 800; }
+    .result-overview-text { margin: 0; color: #2c4146; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+    .final-answer-label { margin: 2px 0 5px; color: var(--rose); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    .final-answer-text { margin: 0; padding: 12px 14px; border: 1px solid #ead0d7; border-radius: 5px; background: #fff8fa; color: #202a2d; font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; user-select: text; }
+    .result-metrics { display: flex; flex-wrap: wrap; gap: 16px; padding-top: 10px; border-top: 1px solid #e5ecee; color: var(--muted); font-size: 11px; }
+    .result-metrics strong { margin-right: 4px; color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; }
+    .readable-section { min-width: 0; }
+    .readable-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 9px; }
+    .readable-section-heading h2 { margin: 0; font-size: 13px; font-weight: 800; }
+    .readable-section-heading span { color: var(--muted); font-size: 11px; }
+    .finding-list, .branch-list { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); overflow: hidden; }
+    .finding { padding: 13px 15px; }
+    .finding + .finding { border-top: 1px solid var(--line); }
+    .finding-title { margin: 0 0 7px; color: #31555a; font-size: 11px; font-weight: 800; }
+    .structured-result { margin: 0; color: var(--ink); font-size: 13px; line-height: 1.62; overflow-wrap: anywhere; }
+    .structured-result-list { display: grid; gap: 6px; margin: 0; padding-left: 19px; color: var(--ink); font-size: 13px; line-height: 1.55; }
+    .branch-row { background: var(--surface); }
+    .branch-row + .branch-row { border-top: 1px solid var(--line); }
+    .branch-summary { min-height: 54px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 13px; cursor: pointer; list-style: none; }
+    .branch-summary::-webkit-details-marker { display: none; }
+    .branch-number { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: #e8f2f1; color: #126b64; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .branch-copy { min-width: 0; }
+    .branch-objective { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
+    .branch-meta { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .branch-body { display: grid; gap: 13px; padding: 0 15px 15px 57px; }
+    .branch-body-label { margin: 0 0 5px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    .branch-fact { padding-top: 11px; border-top: 1px solid #e8edef; }
+    .branch-fact:first-of-type { padding-top: 0; border-top: 0; }
+    .branch-evidence { margin-top: 6px; color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+    .attempted-group { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+    .attempted-summary { padding: 11px 14px; cursor: pointer; color: #4b6065; font-size: 12px; font-weight: 700; }
+    .attempted-list { display: grid; gap: 0; border-top: 1px solid var(--line); }
+    .attempted-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #edf1f2; font-size: 11px; }
+    .attempted-item:last-child { border-bottom: 0; }
+    .attempted-objective { color: #40555a; overflow-wrap: anywhere; }
+    .graph-surface { position: relative; min-height: 0; overflow: hidden; background: #fbfcfc; }
+    .graph-surface::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.52;
+      background-image: linear-gradient(#e9eff0 1px, transparent 1px), linear-gradient(90deg, #e9eff0 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    #graph { position: relative; z-index: 1; display: block; width: 100%; height: 100%; }
+    .graph-empty { position: absolute; z-index: 2; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; pointer-events: none; }
+    .graph-node { cursor: pointer; }
+    .graph-node rect { stroke-width: 1.5; }
+    .graph-node.selected rect { stroke: #172326; stroke-width: 3; }
+    .graph-node:focus-visible rect { stroke: #172326; stroke-width: 3; }
+    .graph-node text { pointer-events: none; font-size: 12px; font-weight: 700; fill: #ffffff; }
+    .graph-node.kind-intent text { fill: #5d3007; }
+    .graph-node.kind-hypothesis text { fill: #432080; }
+    .graph-node.kind-pending text { fill: #405257; }
+    .graph-node.worker-active rect { stroke-width: 2.5; stroke-dasharray: 5 3; }
+    .graph-edge { fill: none; stroke: #9bb0b4; stroke-width: 1.6; marker-end: url(#arrow); }
+    .graph-edge.intent-input { stroke: #90a4aa; }
+    .graph-edge.intent-output { stroke: #2d8b7f; stroke-width: 2.2; }
+    .graph-edge.intent-hypothesis { stroke: #8e73cf; stroke-dasharray: 5 4; }
+    .graph-edge.hypothesis-support, .graph-edge.fact-relation { stroke: #7587a0; stroke-dasharray: 4 4; }
+    .graph-edge.bootstrap-origin { stroke: #4d9f95; stroke-dasharray: 5 4; }
+    .graph-edge.bootstrap-scope { stroke: #d88e47; stroke-dasharray: 3 5; }
+    .graph-edge.completion-evidence { stroke: #be123c; stroke-width: 2.2; }
+    .graph-edge.running { stroke: #d18320; stroke-width: 2.4; stroke-dasharray: 7 4; }
+
+    .timeline-panel { min-height: 0; display: grid; grid-template-rows: 42px minmax(0, 1fr); border-top: 1px solid var(--line); background: var(--surface); }
+    .timeline-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--line); }
+    .timeline-heading h2 { margin: 0; font-size: 12px; font-weight: 750; }
+    .timeline-heading span { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .timeline-list { min-height: 0; overflow: auto; padding: 5px 8px 8px; }
+    .timeline-row { width: 100%; display: grid; grid-template-columns: 92px minmax(105px, 0.45fr) minmax(0, 1fr); align-items: center; gap: 8px; padding: 7px 6px; border: 0; border-bottom: 1px solid #edf1f2; background: transparent; text-align: left; cursor: pointer; }
+    .timeline-row:hover { background: #f4f8f8; }
+    .timeline-time { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .timeline-kind { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #35545a; font-size: 11px; font-weight: 700; }
+    .timeline-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 12px; }
+    .timeline-empty { padding: 18px 8px; color: var(--muted); font-size: 12px; }
+
+    .inspector > .panel-heading { position: sticky; top: 0; z-index: 3; background: var(--surface); }
+    .inspector-body { padding: 0 14px 22px; }
+    .inspector-title { margin: 14px 0 4px; font-size: 15px; font-weight: 750; overflow-wrap: anywhere; }
+    .inspector-subtitle { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 16px 0; border: 1px solid var(--line); background: var(--line); border-radius: 6px; overflow: hidden; }
+    .metric { min-width: 0; padding: 9px; background: var(--surface); }
+    .metric-label { display: block; color: var(--muted); font-size: 10px; }
+    .metric-value { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 750; font-variant-numeric: tabular-nums; }
+    .detail-section { padding: 13px 0; border-top: 1px solid var(--line); }
+    .detail-section h3 { margin: 0 0 9px; color: #37565b; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+    .detail-list { display: grid; gap: 7px; }
+    .detail-line { display: grid; grid-template-columns: minmax(72px, 0.35fr) minmax(0, 1fr); gap: 8px; align-items: start; }
+    .detail-key { color: var(--muted); font-size: 11px; }
+    .detail-value { min-width: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 12px; }
+    .intent-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .record-list { display: grid; gap: 6px; }
+    .record { padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfc; }
+    .record-title { display: flex; align-items: center; justify-content: space-between; gap: 7px; color: #2b4a50; font-size: 11px; font-weight: 700; }
+    .record-value { margin-top: 3px; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+    .notice { margin: 14px; padding: 9px 10px; border: 1px solid #e4c488; border-radius: 6px; background: #fff9ed; color: #89500c; font-size: 12px; overflow-wrap: anywhere; }
+
+    .dialog-layer { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px; background: rgba(19, 35, 38, 0.38); }
+    .dialog { width: min(480px, 100%); border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow); }
+    .dialog-header { padding: 16px 18px 10px; }
+    .dialog-header h2 { margin: 0; font-size: 16px; }
+    .dialog-header p { margin: 5px 0 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .dialog-body { padding: 8px 18px 16px; }
+    .field-label { display: block; margin-bottom: 6px; color: #37565b; font-size: 12px; font-weight: 700; }
+    textarea { width: 100%; min-height: 106px; resize: vertical; padding: 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: #fbfcfc; }
+    .dialog-input { width: 100%; min-height: 38px; padding: 8px 9px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--ink); background: #fbfcfc; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 18px 18px; }
+    .project-create-dialog { width: min(600px, 100%); max-height: calc(100vh - 36px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+    .project-create-dialog .dialog-body { min-height: 0; display: grid; gap: 14px; overflow: auto; }
+    .project-create-fields { display: grid; gap: 13px; }
+    .field-group { min-width: 0; }
+    .start-mode-field { min-width: 0; }
+    .start-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; background: #f2f6f6; }
+    .start-mode-option { position: relative; min-width: 0; cursor: pointer; }
+    .start-mode-option + .start-mode-option { border-left: 1px solid var(--line-strong); }
+    .start-mode-option input { position: absolute; width: 1px; height: 1px; margin: -1px; clip: rect(0, 0, 0, 0); overflow: hidden; }
+    .start-mode-option span { display: grid; place-items: center; min-height: 38px; padding: 7px 10px; color: #496268; font-size: 12px; font-weight: 750; text-align: center; }
+    .start-mode-option input:checked + span { color: #ffffff; background: #0f766e; }
+    .start-mode-option input:focus-visible + span { outline: 2px solid var(--blue); outline-offset: -3px; }
+    .confirmation-check { display: flex; align-items: flex-start; gap: 9px; color: #334b50; font-size: 12px; line-height: 1.5; cursor: pointer; }
+    .confirmation-check input { width: 16px; height: 16px; margin: 1px 0 0; flex: 0 0 auto; accent-color: var(--rose); }
+    .hint-editor { display: grid; gap: 8px; }
+    .hint-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .hint-editor-heading .field-label { margin: 0; }
+    .new-project-hint-list { display: grid; gap: 8px; }
+    .new-project-hint-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+    .new-project-hint-input { min-height: 70px; }
+    .hint-remove-button { min-width: 32px; padding-left: 8px; padding-right: 8px; }
+    .benchmark-dialog { width: min(920px, 100%); max-height: calc(100vh - 36px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+    .benchmark-dialog .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }
+    .benchmark-dialog .dialog-body { min-height: 0; overflow: auto; padding-top: 14px; }
+    .benchmark-status-line { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+    .benchmark-header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+    .benchmark-automation-line { min-height: 34px; padding: 9px 14px; border-bottom: 1px solid var(--line); background: #f4f8f7; color: #36575a; font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+    .benchmark-automation-line.error { background: #fff3f5; color: #a11d3d; }
+    .benchmark-list { display: grid; gap: 10px; }
+    .benchmark-card { display: grid; gap: 10px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 7px; background: #fbfcfc; }
+    .benchmark-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .benchmark-code { margin: 0; font-size: 13px; font-weight: 800; overflow-wrap: anywhere; }
+    .benchmark-description { margin: 4px 0 0; color: #41565b; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+    .benchmark-meta { display: flex; flex-wrap: wrap; gap: 7px 14px; color: var(--muted); font-size: 11px; }
+    .benchmark-meta strong { color: var(--ink); }
+    .benchmark-address { padding: 7px 9px; border: 1px solid #dce9e7; border-radius: 5px; background: #f1f8f7; color: #24534f; font-family: Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; user-select: text; }
+    .benchmark-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+    .benchmark-submit { display: flex; min-width: min(100%, 390px); flex: 1 1 340px; gap: 7px; }
+    .benchmark-submit .dialog-input { min-width: 0; min-height: 32px; }
+    .benchmark-empty { padding: 28px 14px; color: var(--muted); text-align: center; }
+    .toast { position: fixed; z-index: 30; right: 18px; bottom: 18px; max-width: min(420px, calc(100vw - 36px)); padding: 10px 12px; border: 1px solid #8ab3ae; border-radius: 6px; background: #ecf8f5; color: #075f55; box-shadow: var(--shadow); font-size: 12px; overflow-wrap: anywhere; }
+    .toast.error { border-color: #d99aaa; background: #fff2f5; color: #9b1635; }
+
+    @media (max-width: 1120px) {
+      .workbench {
+        grid-template-columns: 240px minmax(0, 1fr);
+        grid-template-rows: minmax(508px, 1fr) minmax(260px, 300px);
+        overflow: auto;
+      }
+      .workbench.results-mode {
+        grid-template-columns: 240px minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+        overflow: hidden;
+      }
+      .sidebar .panel-heading { flex-wrap: wrap; align-content: center; row-gap: 5px; }
+      .sidebar-heading-title { flex: 1 1 auto; }
+      .sidebar .count-row { margin-left: auto; }
+      .inspector { grid-column: 1 / -1; display: grid; grid-template-columns: 240px minmax(0, 1fr); max-height: 300px; border-top: 1px solid var(--line); border-left: 0; }
+      .inspector > .panel-heading { border-right: 1px solid var(--line); border-bottom: 0; }
+      .inspector-body { max-height: 300px; overflow: auto; }
+    }
+    @media (max-width: 780px) {
+      .topbar { padding: 0 12px; }
+      .brand-subtitle, .connection span { display: none; }
+      .workbench { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 208px minmax(590px, 1fr) minmax(260px, auto); overflow: auto; }
+      .workbench.results-mode { grid-template-columns: minmax(0, 1fr); grid-template-rows: 208px minmax(590px, 1fr); overflow: auto; }
+      .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+      .project-list { display: flex; overflow: auto; }
+      .project-entry { flex: 0 0 248px; }
+      .project-item { min-width: 0; }
+      .center { min-height: 590px; grid-template-rows: 88px minmax(230px, 1fr) 230px; }
+      .center.results-mode { grid-template-rows: 88px minmax(500px, 1fr); }
+      .project-header { align-items: flex-start; }
+      .project-actions { flex-wrap: wrap; justify-content: flex-end; }
+      .inspector { display: block; max-height: none; border-top: 1px solid var(--line); }
+      .inspector > .panel-heading { border-bottom: 1px solid var(--line); }
+      .inspector-body { max-height: none; }
+      .timeline-row { grid-template-columns: 76px minmax(0, 1fr); }
+      .timeline-kind { display: none; }
+      .sidebar-heading-title { gap: 6px; }
+      .sidebar-heading-title .button { padding-left: 8px; padding-right: 8px; }
+      .dialog-layer { align-items: start; overflow: auto; padding: 10px; }
+      .project-create-dialog { max-height: none; margin: auto 0; }
+      .benchmark-dialog { max-height: none; margin: auto 0; }
+      .benchmark-card-header { align-items: stretch; flex-direction: column; }
+      .benchmark-submit { min-width: 100%; }
+      .new-project-hint-row { grid-template-columns: minmax(0, 1fr) 34px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-title">Slime Cairn</span>
+        <span class="brand-subtitle">Blackboard Runtime</span>
+      </div>
+      <div class="topbar-actions">
+        <span id="connection" class="connection" title="服务连接状态"><span class="connection-dot"></span><span id="connection-text">连接中</span></span>
+        <button id="benchmark-button" class="button topbar-button" type="button">评测平台</button>
+        <button id="refresh-button" class="button topbar-button" type="button">刷新</button>
+      </div>
+    </header>
+
+    <main class="workbench">
+      <aside class="sidebar" aria-label="项目列表">
+        <div class="panel-heading">
+          <div class="sidebar-heading-title">
+            <h2>项目</h2>
+            <button id="new-project-button" class="button primary" type="button">新建项目</button>
+          </div>
+          <div class="count-row" aria-label="项目状态">
+            <span title="运行中"><strong id="running-count">0</strong>运行</span>
+            <span title="已停止"><strong id="stopped-count">0</strong>停止</span>
+            <span title="已完成"><strong id="completed-count">0</strong>完成</span>
+          </div>
+        </div>
+        <div id="project-bulk-actions" class="project-bulk-actions">
+          <label class="project-select-all-label" for="project-select-all">
+            <input id="project-select-all" type="checkbox">
+            <span>全选</span>
+          </label>
+          <span id="selected-project-count" class="project-bulk-count">已选 0 个</span>
+          <button id="bulk-delete-button" class="button critical" type="button" disabled>删除所选</button>
+        </div>
+        <div id="project-list" class="project-list"></div>
+      </aside>
+
+      <section class="center" aria-label="项目图谱与时间线">
+        <div class="project-header">
+          <div class="project-main">
+            <div class="project-title-line">
+              <h1 id="project-title" class="project-title">项目</h1>
+              <span id="project-status" class="status unknown">等待</span>
+            </div>
+            <div id="project-target" class="project-target"></div>
+          </div>
+          <div class="project-actions">
+            <div id="view-switch" class="view-switch hidden" role="tablist" aria-label="项目视图">
+              <button id="results-view-button" class="view-tab" type="button" role="tab" aria-selected="true">成果</button>
+              <button id="graph-view-button" class="view-tab" type="button" role="tab" aria-selected="false">图谱</button>
+            </div>
+            <button id="hint-button" class="button hidden" type="button">添加 Hint</button>
+            <button id="stop-button" class="button warning hidden" type="button">停止</button>
+            <button id="resume-button" class="button primary hidden" type="button">继续</button>
+            <button id="reopen-button" class="button critical hidden" type="button">重新打开</button>
+            <button id="delete-button" class="button critical hidden" type="button" title="删除当前项目">删除</button>
+          </div>
+        </div>
+
+        <section id="readable-view" class="readable-view" aria-label="项目成果">
+          <div id="readable-content" class="readable-inner"></div>
+        </section>
+
+        <div id="graph-view" class="graph-surface hidden">
+          <div id="graph-empty" class="graph-empty">选择项目</div>
+          <svg id="graph" role="img" aria-label="Blackboard 图谱"></svg>
+        </div>
+
+        <section id="timeline-panel" class="timeline-panel hidden" aria-label="活动时间线">
+          <div class="timeline-heading"><h2>活动时间线</h2><span id="event-count">0 条记录</span></div>
+          <div id="timeline-list" class="timeline-list"></div>
+        </section>
+      </section>
+
+      <aside class="inspector" aria-label="详情检查器">
+        <div class="panel-heading"><h2>Inspector</h2><span id="inspector-mode" class="status unknown">项目</span></div>
+        <div id="inspector-body" class="inspector-body"></div>
+      </aside>
+    </main>
+  </div>
+
+  <div id="new-project-dialog-layer" class="dialog-layer hidden" role="presentation">
+    <section class="dialog project-create-dialog" role="dialog" aria-modal="true" aria-labelledby="new-project-title">
+      <div class="dialog-header">
+        <h2 id="new-project-title">新建项目</h2>
+      </div>
+      <div class="dialog-body">
+        <div class="project-create-fields">
+          <div class="field-group">
+            <label class="field-label" for="new-project-name">项目名</label>
+            <input id="new-project-name" class="dialog-input" type="text" autocomplete="off" required aria-required="true">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="new-project-target">目标</label>
+            <input id="new-project-target" class="dialog-input" type="text" inputmode="url" autocomplete="off" spellcheck="false" required aria-required="true">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="new-project-goal">目标描述</label>
+            <textarea id="new-project-goal" required aria-required="true"></textarea>
+          </div>
+          <div class="start-mode-field">
+            <span id="new-project-start-mode-label" class="field-label">启动路径</span>
+            <div class="start-mode-options" role="radiogroup" aria-labelledby="new-project-start-mode-label">
+              <label class="start-mode-option">
+                <input id="new-project-growth" name="new-project-start-mode" type="radio" value="growth" checked>
+                <span>黏菌分支</span>
+              </label>
+              <label class="start-mode-option">
+                <input id="new-project-direct" name="new-project-start-mode" type="radio" value="direct">
+                <span>Cairn 直推</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <section class="hint-editor" aria-labelledby="new-project-hints-label">
+          <div class="hint-editor-heading">
+            <span id="new-project-hints-label" class="field-label">初始 Hint</span>
+            <button id="new-project-add-hint" class="button" type="button">添加 Hint</button>
+          </div>
+          <div id="new-project-hint-list" class="new-project-hint-list"></div>
+        </section>
+      </div>
+      <div class="dialog-actions">
+        <button id="new-project-cancel" class="button" type="button">取消</button>
+        <button id="new-project-confirm" class="button primary" type="button" disabled>创建项目</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="hint-dialog-layer" class="dialog-layer hidden" role="presentation">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="hint-title">
+      <div class="dialog-header">
+        <h2 id="hint-title">添加 Hint</h2>
+        <p id="hint-project-name"></p>
+      </div>
+      <div class="dialog-body">
+        <label class="field-label" for="hint-content">策略提示或新的判断</label>
+        <textarea id="hint-content" required aria-required="true"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button id="hint-cancel" class="button" type="button">取消</button>
+        <button id="hint-confirm" class="button primary" type="button">添加</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="reopen-dialog-layer" class="dialog-layer hidden" role="presentation">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="reopen-title">
+      <div class="dialog-header">
+        <h2 id="reopen-title">重新打开项目</h2>
+        <p id="reopen-project-name"></p>
+      </div>
+      <div class="dialog-body">
+        <label class="field-label" for="reopen-description">新的反馈或目标调整</label>
+        <textarea id="reopen-description" required aria-required="true"></textarea>
+      </div>
+      <div class="dialog-actions">
+        <button id="reopen-cancel" class="button" type="button">取消</button>
+        <button id="reopen-confirm" class="button primary" type="button">重新打开</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="delete-dialog-layer" class="dialog-layer hidden" role="presentation">
+    <section class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description">
+      <div class="dialog-header">
+        <h2 id="delete-title">删除项目</h2>
+        <p id="delete-description">将删除项目“<strong id="delete-project-name"></strong>”及其黑板记录。输入完整项目名后确认。</p>
+      </div>
+      <div class="dialog-body">
+        <label class="field-label" for="delete-project-confirmation">输入项目名以确认删除</label>
+        <input id="delete-project-confirmation" class="dialog-input" type="text" autocomplete="off" spellcheck="false" required aria-required="true">
+      </div>
+      <div class="dialog-actions">
+        <button id="delete-cancel" class="button" type="button">取消</button>
+        <button id="delete-confirm" class="button critical" type="button" disabled>删除项目</button>
+      </div>
+    </section>
+  </div>
+  <div id="bulk-delete-dialog-layer" class="dialog-layer hidden" role="presentation">
+    <section class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="bulk-delete-title" aria-describedby="bulk-delete-description">
+      <div class="dialog-header">
+        <h2 id="bulk-delete-title">批量删除项目</h2>
+        <p id="bulk-delete-description">将删除所选 <strong id="bulk-delete-count">0</strong> 个项目，并清理各自的 Worker、容器、工作区和黑板记录。</p>
+      </div>
+      <div class="dialog-body">
+        <label class="confirmation-check" for="bulk-delete-confirmation">
+          <input id="bulk-delete-confirmation" type="checkbox">
+          <span>确认删除本次选择的全部项目</span>
+        </label>
+      </div>
+      <div class="dialog-actions">
+        <button id="bulk-delete-cancel" class="button" type="button">取消</button>
+        <button id="bulk-delete-confirm" class="button critical" type="button" disabled>删除所选项目</button>
+      </div>
+    </section>
+  </div>
+  <div id="benchmark-dialog-layer" class="dialog-layer hidden" role="presentation">
+    <section class="dialog benchmark-dialog" role="dialog" aria-modal="true" aria-labelledby="benchmark-title">
+      <div class="dialog-header">
+        <div>
+          <h2 id="benchmark-title">TSec Agent 评测平台</h2>
+          <p>启动题目后自动创建 Reason-first 黏菌项目；最多同时运行 3 个题目实例。</p>
+          <div id="benchmark-status-line" class="benchmark-status-line"></div>
+        </div>
+        <div class="benchmark-header-actions">
+          <button id="benchmark-automation-start" class="button primary" type="button">开始自动化</button>
+          <button id="benchmark-automation-stop" class="button critical hidden" type="button">停止</button>
+          <button id="benchmark-refresh" class="button" type="button">刷新题目</button>
+        </div>
+      </div>
+      <div id="benchmark-automation-line" class="benchmark-automation-line">自动化未启动</div>
+      <div class="dialog-body">
+        <div id="benchmark-list" class="benchmark-list"></div>
+      </div>
+      <div class="dialog-actions">
+        <button id="benchmark-close-dialog" class="button" type="button">关闭</button>
+      </div>
+    </section>
+  </div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const svgNs = "http://www.w3.org/2000/svg";
+      const state = {
+        projects: [],
+        view: null,
+        events: [],
+        eventCursor: 0,
+        selectedProjectId: "",
+        selectedNodeId: "",
+        viewMode: "results",
+        online: false,
+        refreshing: false,
+        toastTimer: null,
+        deleteProject: null,
+        selectedProjectIds: new Set(),
+        bulkDeleteProjectIds: [],
+        creatingProject: false,
+        benchmarkStatus: null,
+        benchmarkChallenges: [],
+        benchmarkLoading: false,
+        benchmarkPollTimer: null,
+        benchmarkRenderKey: "",
+        benchmarkError: "",
+      };
+
+      const byId = (id) => document.getElementById(id);
+      const graph = byId("graph");
+      const projectList = byId("project-list");
+      const timelineList = byId("timeline-list");
+      const inspectorBody = byId("inspector-body");
+      const readableContent = byId("readable-content");
+
+      function element(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+
+      function svgElement(tag, attributes = {}) {
+        const node = document.createElementNS(svgNs, tag);
+        for (const [key, value] of Object.entries(attributes)) {
+          node.setAttribute(key, String(value));
+        }
+        return node;
+      }
+
+      async function request(path, options = {}) {
+        const headers = { Accept: "application/json", ...(options.headers || {}) };
+        if (options.body) headers["Content-Type"] = "application/json";
+        const response = await fetch(path, { ...options, headers });
+        if (!response.ok) {
+          let detail = "";
+          try {
+            const payload = await response.json();
+            const rawDetail = payload.detail || "";
+            detail = typeof rawDetail === "object"
+              ? (rawDetail.message || rawDetail.code || JSON.stringify(rawDetail))
+              : rawDetail;
+          } catch (_) {
+            detail = await response.text();
+          }
+          throw new Error(detail || `HTTP ${response.status}`);
+        }
+        const contentType = response.headers.get("content-type") || "";
+        return contentType.includes("application/json") ? response.json() : response.text();
+      }
+
+      function shortText(value, limit = 110) {
+        const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+        if (normalized.length <= limit) return normalized;
+        return `${normalized.slice(0, Math.max(1, limit - 3))}...`;
+      }
+
+      function nodeLabelLines(value, limit = 22, maxLines = 3) {
+        const text = String(value ?? "").replace(/\s+/g, " ").trim() || "-";
+        const lines = [];
+        for (let index = 0; index < text.length && lines.length < maxLines; index += limit) {
+          lines.push(text.slice(index, index + limit));
+        }
+        if (text.length > limit * maxLines && lines.length) {
+          lines[lines.length - 1] = `${lines[lines.length - 1].slice(0, Math.max(1, limit - 3))}...`;
+        }
+        return lines;
+      }
+
+      function formatTime(value) {
+        if (!value) return "-";
+        const milliseconds = Number(value) * 1000;
+        const date = Number.isFinite(milliseconds) ? new Date(milliseconds) : new Date(value);
+        if (Number.isNaN(date.getTime())) return String(value);
+        return new Intl.DateTimeFormat("zh-CN", {
+          month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+        }).format(date);
+      }
+
+      function statusLabel(status) {
+        const labels = { running: "运行", stopped: "停止", completed: "完成", pending: "等待", failed: "失败", dormant: "休眠", retry_wait: "等待重试", active: "运行" };
+        return labels[status] || String(status || "未知");
+      }
+
+      function setStatusChip(node, status) {
+        node.textContent = statusLabel(status);
+        node.className = `status ${["running", "stopped", "completed", "pending", "failed", "dormant", "retry_wait", "stale"].includes(status) ? status : "unknown"}`;
+      }
+
+      function elapsedSeconds(value) {
+        const timestamp = Number(value || 0);
+        if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+        return Math.max(0, Math.floor(Date.now() / 1000 - timestamp));
+      }
+
+      function durationLabel(seconds) {
+        if (seconds === null || seconds === undefined) return "-";
+        const value = Math.max(0, Math.floor(Number(seconds) || 0));
+        if (value < 60) return `${value}s`;
+        const minutes = Math.floor(value / 60);
+        const remainder = value % 60;
+        if (minutes < 60) return `${minutes}m ${remainder}s`;
+        return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+      }
+
+      function workerPhaseLabel(mode) {
+        const labels = { bootstrap: "Bootstrap", explore: "Explore", reason: "Reason" };
+        return labels[String(mode || "")] || "Worker";
+      }
+
+      function activeWorkers(view) {
+        const runtime = view?.runtime || {};
+        const dispatcher = runtime.dispatcher || {};
+        const dispatcherStatus = dispatcher.status || {};
+        const leaseByIntent = new Map((runtime.active_leases || []).map((lease) => [lease.intent_id, lease]));
+        const workers = [];
+        const knownIntentIds = new Set();
+        const dispatcherHeartbeat = dispatcher.heartbeat_at || null;
+        const stale = Boolean(dispatcher.stale);
+
+        for (const item of dispatcherStatus.running_intents || []) {
+          const lease = leaseByIntent.get(item.intent_id) || {};
+          knownIntentIds.add(item.intent_id);
+          const heartbeatAt = lease.last_heartbeat_at || dispatcherHeartbeat;
+          workers.push({
+            intentId: item.intent_id,
+            workerName: item.worker_name || "worker",
+            mode: item.mode || lease.kind || "explore",
+            phase: workerPhaseLabel(item.mode || lease.kind || "explore"),
+            startedAt: item.started_at || heartbeatAt,
+            heartbeatAt,
+            stale,
+          });
+        }
+
+        const reason = dispatcherStatus.reason_running;
+        const reasonLease = runtime.reason_lease || {};
+        if (reason) {
+          const heartbeatAt = reasonLease.last_heartbeat_at || dispatcherHeartbeat;
+          workers.push({
+            intentId: reason.intent_id || reasonLease.reason_intent_id || "",
+            workerName: reason.worker_name || reasonLease.worker_name || "reason",
+            mode: "reason",
+            phase: workerPhaseLabel("reason"),
+            startedAt: reason.started_at || reasonLease.started_at || heartbeatAt,
+            heartbeatAt,
+            stale,
+          });
+        }
+
+        // A service restart can leave a valid lease before its next dispatcher
+        // snapshot. Keep that work visible without exposing its owner token.
+        for (const lease of runtime.active_leases || []) {
+          if (knownIntentIds.has(lease.intent_id)) continue;
+          workers.push({
+            intentId: lease.intent_id,
+            workerName: "worker",
+            mode: lease.kind || "explore",
+            phase: workerPhaseLabel(lease.kind || "explore"),
+            startedAt: lease.last_heartbeat_at || null,
+            heartbeatAt: lease.last_heartbeat_at || null,
+            stale: true,
+          });
+        }
+
+        return workers.sort((left, right) => Number(left.startedAt || 0) - Number(right.startedAt || 0));
+      }
+
+      function retryNotBefore(intent) {
+        const value = Number(intent?.retry_not_before || 0);
+        return Number.isFinite(value) ? value : 0;
+      }
+
+      function intentRetryWaiting(intent) {
+        return retryNotBefore(intent) > Date.now() / 1000;
+      }
+
+      function intentDisplayStatus(intent) {
+        if (intent?.kind === "intent" && (intent.status === "retry_wait" || intentRetryWaiting(intent))) return "retry_wait";
+        return intent?.status;
+      }
+
+      function retryDelayLabel(intent) {
+        const seconds = Math.max(0, Math.ceil(retryNotBefore(intent) - Date.now() / 1000));
+        if (!seconds) return "即将调度";
+        if (seconds < 60) return `${seconds} 秒后`;
+        const minutes = Math.ceil(seconds / 60);
+        return `${minutes} 分钟后`;
+      }
+
+      function showToast(message, error = false) {
+        const toast = byId("toast");
+        toast.textContent = message;
+        toast.className = `toast${error ? " error" : ""}`;
+        clearTimeout(state.toastTimer);
+        state.toastTimer = window.setTimeout(() => toast.classList.add("hidden"), 4200);
+      }
+
+      function setConnection(online) {
+        state.online = online;
+        const connection = byId("connection");
+        connection.classList.toggle("online", online);
+        byId("connection-text").textContent = online ? "已连接" : "连接中";
+      }
+
+      function projectById(id) {
+        return state.projects.find((project) => project.id === id) || null;
+      }
+
+      function currentProject() {
+        return state.view ? state.view.project : null;
+      }
+
+      function activeGraph(view = state.view) {
+        return view?.core_graph || view?.graph || { nodes: [], edges: [] };
+      }
+
+      function enrichedGraphNodes(view = state.view) {
+        if (!view) return [];
+        const legacyById = new Map((view.graph?.nodes || []).map((node) => [node.id, node]));
+        const factMeta = view.slime_meta?.facts || {};
+        const intentMeta = view.slime_meta?.intents || {};
+        return (activeGraph(view).nodes || []).map((node) => {
+          const legacy = legacyById.get(node.id) || {};
+          if (node.kind === "intent") {
+            const meta = intentMeta[node.entity_id] || {};
+            return {
+              ...legacy,
+              ...meta,
+              ...node,
+              status: node.state || meta.status || legacy.status,
+            };
+          }
+          const meta = factMeta[node.entity_id] || {};
+          return {
+            ...legacy,
+            ...meta,
+            ...(meta.memory || {}),
+            ...node,
+            memory_state: meta.memory?.state || legacy.memory_state,
+          };
+        });
+      }
+
+      async function loadProjects() {
+        const payload = await request("/projects");
+        state.projects = payload.projects || [];
+        const existingProjectIds = new Set(state.projects.map((project) => project.id));
+        for (const projectId of state.selectedProjectIds) {
+          if (!existingProjectIds.has(projectId)) state.selectedProjectIds.delete(projectId);
+        }
+        const selectedExists = state.projects.some((project) => project.id === state.selectedProjectId);
+        if (!selectedExists) {
+          const running = state.projects.find((project) => project.status === "running");
+          const latest = state.projects[state.projects.length - 1] || null;
+          state.selectedProjectId = (running || latest || {}).id || "";
+        }
+      }
+
+      async function loadView() {
+        if (!state.selectedProjectId) {
+          state.view = null;
+          state.events = [];
+          state.eventCursor = 0;
+          return;
+        }
+        state.view = await request(`/projects/${encodeURIComponent(state.selectedProjectId)}/view`);
+        if (!state.selectedNodeId || !activeGraph(state.view).nodes.some((node) => node.id === state.selectedNodeId)) {
+          state.selectedNodeId = "";
+        }
+      }
+
+      async function loadEvents(reset = false) {
+        if (!state.selectedProjectId) return;
+        let afterId = reset ? 0 : state.eventCursor;
+        const incoming = [];
+        for (let pageNumber = 0; pageNumber < 5; pageNumber += 1) {
+          const page = await request(`/projects/${encodeURIComponent(state.selectedProjectId)}/events?after_id=${afterId}&limit=250`);
+          incoming.push(...(page.events || []));
+          afterId = page.next_after_id || afterId;
+          if (!page.has_more || !(page.events || []).length) break;
+        }
+        const merged = new Map(reset ? [] : state.events.map((event) => [event.id, event]));
+        for (const event of incoming) merged.set(event.id, event);
+        state.events = [...merged.values()].sort((left, right) => left.id - right.id).slice(-1250);
+        state.eventCursor = state.events.length ? state.events[state.events.length - 1].id : afterId;
+      }
+
+      async function refresh(resetEvents = false) {
+        if (state.refreshing) return;
+        state.refreshing = true;
+        byId("refresh-button").disabled = true;
+        try {
+          await loadProjects();
+          await loadView();
+          await loadEvents(resetEvents);
+          setConnection(true);
+          render();
+        } catch (error) {
+          setConnection(false);
+          showToast(`请求失败: ${error.message}`, true);
+          render();
+        } finally {
+          state.refreshing = false;
+          byId("refresh-button").disabled = false;
+        }
+      }
+
+      async function selectProject(projectId) {
+        if (!projectId || projectId === state.selectedProjectId && state.view) return;
+        state.selectedProjectId = projectId;
+        state.selectedNodeId = "";
+        state.viewMode = "results";
+        state.events = [];
+        state.eventCursor = 0;
+        await refresh(true);
+        byId("readable-view").scrollTop = 0;
+      }
+
+      function updateBulkDeleteControls() {
+        const projectIds = state.projects.map((project) => project.id);
+        const selectedCount = projectIds.filter((projectId) => state.selectedProjectIds.has(projectId)).length;
+        const selectAll = byId("project-select-all");
+        selectAll.disabled = projectIds.length === 0;
+        selectAll.checked = projectIds.length > 0 && selectedCount === projectIds.length;
+        selectAll.indeterminate = selectedCount > 0 && selectedCount < projectIds.length;
+        byId("selected-project-count").textContent = `已选 ${selectedCount} 个`;
+        byId("bulk-delete-button").disabled = selectedCount === 0;
+      }
+
+      function renderProjectList() {
+        const counts = { running: 0, stopped: 0, completed: 0 };
+        state.projects.forEach((project) => { counts[project.status] = (counts[project.status] || 0) + 1; });
+        byId("running-count").textContent = counts.running || 0;
+        byId("stopped-count").textContent = counts.stopped || 0;
+        byId("completed-count").textContent = counts.completed || 0;
+
+        projectList.replaceChildren();
+        if (!state.projects.length) {
+          projectList.append(element("div", "empty-list", "暂无项目"));
+          updateBulkDeleteControls();
+          return;
+        }
+        for (const project of state.projects) {
+          const entry = element("div", "project-entry");
+          const checkbox = element("input");
+          checkbox.type = "checkbox";
+          checkbox.className = "project-checkbox";
+          checkbox.checked = state.selectedProjectIds.has(project.id);
+          checkbox.setAttribute("aria-label", `选择项目 ${project.name}`);
+          checkbox.addEventListener("change", () => {
+            if (checkbox.checked) state.selectedProjectIds.add(project.id);
+            else state.selectedProjectIds.delete(project.id);
+            updateBulkDeleteControls();
+          });
+          const item = element("button", `project-item${project.id === state.selectedProjectId ? " selected" : ""}`);
+          item.type = "button";
+          item.title = `${project.name}\n${project.target}`;
+          item.addEventListener("click", () => selectProject(project.id));
+          const first = element("div", "project-item-line");
+          first.append(element("span", "project-item-title", project.name));
+          const chip = element("span");
+          setStatusChip(chip, project.status);
+          first.append(chip);
+          item.append(first, element("div", "project-item-target", project.target));
+          entry.append(checkbox, item);
+          projectList.append(entry);
+        }
+        updateBulkDeleteControls();
+      }
+
+      function renderProjectHeader() {
+        const project = currentProject();
+        const stopButton = byId("stop-button");
+        const resumeButton = byId("resume-button");
+        const reopenButton = byId("reopen-button");
+        const hintButton = byId("hint-button");
+        const deleteButton = byId("delete-button");
+        const viewSwitch = byId("view-switch");
+        stopButton.classList.add("hidden");
+        resumeButton.classList.add("hidden");
+        reopenButton.classList.add("hidden");
+        hintButton.classList.add("hidden");
+        deleteButton.classList.add("hidden");
+        viewSwitch.classList.add("hidden");
+        if (!project) {
+          byId("project-title").textContent = "项目";
+          byId("project-target").textContent = "";
+          setStatusChip(byId("project-status"), "unknown");
+          return;
+        }
+        byId("project-title").textContent = project.name;
+        byId("project-target").textContent = project.target;
+        setStatusChip(byId("project-status"), project.status);
+        viewSwitch.classList.remove("hidden");
+        hintButton.classList.remove("hidden");
+        deleteButton.classList.remove("hidden");
+        if (project.status === "running") stopButton.classList.remove("hidden");
+        const benchmarkManaged = Boolean(project.scope?.benchmark?.managed);
+        if (project.status === "stopped" && !benchmarkManaged) resumeButton.classList.remove("hidden");
+        if (project.status === "completed" && !benchmarkManaged) reopenButton.classList.remove("hidden");
+      }
+
+      function structuredResultParts(value) {
+        const normalized = String(value ?? "").replace(/\r/g, "").trim();
+        if (!normalized) return [];
+        const lines = normalized
+          .replace(/([。！？])\s*/g, "$1\n")
+          .split(/[\n；]+/)
+          .map((part) => part.trim())
+          .filter(Boolean);
+        return lines.length ? lines : [normalized];
+      }
+
+      function appendStructuredResult(parent, value) {
+        const parts = structuredResultParts(value);
+        if (parts.length <= 1) {
+          parent.append(element("p", "structured-result", parts[0] || "暂无具体结果"));
+          return;
+        }
+        const list = element("ul", "structured-result-list");
+        parts.forEach((part) => list.append(element("li", "", part)));
+        parent.append(list);
+      }
+
+      function readableProjection(view) {
+        if (view?.readable) return view.readable;
+        return {
+          completion: view?.active_completion || null,
+          key_facts: (view?.facts || []).filter((fact) => fact.memory_state !== "dormant").slice(-3).reverse(),
+          branches: [],
+          counts: { active: 0, result: 0, attempted: 0, visible_facts: 0 },
+        };
+      }
+
+      function branchMeta(branch) {
+        const values = [];
+        if (branch.fact_count) values.push(`${branch.fact_count} 条结果`);
+        if (branch.attempts) values.push(`${branch.attempts} 次尝试`);
+        const worker = branch.latest_run?.worker_name;
+        if (worker) values.push(worker);
+        return values.join(" · ") || "等待结果";
+      }
+
+      function renderBranch(branch, index) {
+        const details = element("details", "branch-row");
+        details.open = branch.group === "active";
+        const summary = element("summary", "branch-summary");
+        const number = element("span", "branch-number", String(index + 1).padStart(2, "0"));
+        const copy = element("span", "branch-copy");
+        copy.append(
+          element("span", "branch-objective", branch.objective || "未命名分支"),
+          element("span", "branch-meta", branchMeta(branch)),
+        );
+        const chip = element("span");
+        setStatusChip(chip, branch.status);
+        summary.append(number, copy, chip);
+
+        const body = element("div", "branch-body");
+        const objective = element("div");
+        objective.append(element("p", "branch-body-label", "探索任务"));
+        appendStructuredResult(objective, branch.objective);
+        body.append(objective);
+
+        if ((branch.facts || []).length) {
+          branch.facts.forEach((fact, factIndex) => {
+            const result = element("div", "branch-fact");
+            result.append(element("p", "branch-body-label", `分支结论 ${factIndex + 1}`));
+            appendStructuredResult(result, fact.object);
+            if ((fact.evidence_refs || []).length) {
+              result.append(element("div", "branch-evidence", `证据: ${fact.evidence_refs.join(" · ")}`));
+            }
+            body.append(result);
+          });
+        } else {
+          const latest = branch.latest_run || {};
+          const note = latest.error || latest.stop_reason || (branch.group === "active" ? "Worker 正在处理" : "该方向没有形成新的有效 Fact");
+          const result = element("div", "branch-fact");
+          result.append(element("p", "branch-body-label", "当前结果"));
+          appendStructuredResult(result, note);
+          body.append(result);
+        }
+        details.append(summary, body);
+        return details;
+      }
+
+      function renderReadableView() {
+        readableContent.replaceChildren();
+        const view = state.view;
+        if (!view) {
+          readableContent.append(element("div", "readable-empty", state.selectedProjectId ? "正在读取项目" : "选择项目"));
+          return;
+        }
+        const readable = readableProjection(view);
+        const completion = readable.completion;
+        const overview = element("section", `result-overview${completion ? " completed" : ""}`);
+        const overviewHeader = element("div", "result-overview-header");
+        overviewHeader.append(element("h2", "result-overview-title", completion ? "最终答案" : view.project.status === "running" ? "任务进行中" : "任务已停止"));
+        const overviewStatus = element("span");
+        setStatusChip(overviewStatus, view.project.status);
+        overviewHeader.append(overviewStatus);
+        overview.append(overviewHeader);
+        if (completion) overview.append(element("p", "final-answer-label", "Reason 最终结论"));
+        const overviewText = element("p", completion ? "final-answer-text" : "result-overview-text");
+        overviewText.textContent = completion?.description || view.project.goal;
+        overview.append(overviewText);
+        const metrics = element("div", "result-metrics");
+        const metricValues = [
+          [readable.counts?.result || 0, "有效分支"],
+          [readable.counts?.active || 0, "进行中"],
+          [readable.counts?.attempted || 0, "无新增"],
+          [(readable.key_facts || []).length, "关键发现"],
+        ];
+        metricValues.forEach(([value, label]) => {
+          const metric = element("span");
+          metric.append(element("strong", "", String(value)), document.createTextNode(label));
+          metrics.append(metric);
+        });
+        overview.append(metrics);
+        readableContent.append(overview);
+
+        const keyFacts = readable.key_facts || [];
+        if (keyFacts.length) {
+          const section = element("section", "readable-section");
+          const heading = element("div", "readable-section-heading");
+          heading.append(element("h2", "", completion ? "完成依据" : "关键发现"), element("span", "", `${keyFacts.length} 条`));
+          const list = element("div", "finding-list");
+          keyFacts.forEach((fact, index) => {
+            const finding = element("article", "finding");
+            finding.append(element("h3", "finding-title", `关键发现 ${index + 1}`));
+            appendStructuredResult(finding, fact.object);
+            if ((fact.evidence_refs || []).length) {
+              finding.append(element("div", "branch-evidence", `证据: ${fact.evidence_refs.join(" · ")}`));
+            }
+            list.append(finding);
+          });
+          section.append(heading, list);
+          readableContent.append(section);
+        }
+
+        const visibleBranches = (readable.branches || []).filter((branch) => branch.group !== "attempted");
+        if (visibleBranches.length) {
+          const section = element("section", "readable-section");
+          const heading = element("div", "readable-section-heading");
+          heading.append(element("h2", "", "探索分支"), element("span", "", `${visibleBranches.length} 条有进展或进行中的分支`));
+          const list = element("div", "branch-list");
+          visibleBranches.forEach((branch, index) => list.append(renderBranch(branch, index)));
+          section.append(heading, list);
+          readableContent.append(section);
+        }
+
+        const attempted = (readable.branches || []).filter((branch) => branch.group === "attempted");
+        if (attempted.length) {
+          const section = element("section", "readable-section");
+          const group = element("details", "attempted-group");
+          group.append(element("summary", "attempted-summary", `其他已尝试方向 (${attempted.length})`));
+          const list = element("div", "attempted-list");
+          attempted.forEach((branch) => {
+            const item = element("div", "attempted-item");
+            item.append(element("span", "attempted-objective", branch.objective || "未命名分支"));
+            const chip = element("span");
+            setStatusChip(chip, branch.status);
+            item.append(chip);
+            list.append(item);
+          });
+          group.append(list);
+          section.append(group);
+          readableContent.append(section);
+        }
+      }
+
+      function applyViewMode() {
+        const resultsMode = state.viewMode !== "graph";
+        document.querySelector(".workbench").classList.toggle("results-mode", resultsMode);
+        document.querySelector(".center").classList.toggle("results-mode", resultsMode);
+        byId("readable-view").classList.toggle("hidden", !resultsMode);
+        byId("graph-view").classList.toggle("hidden", resultsMode);
+        byId("timeline-panel").classList.toggle("hidden", resultsMode);
+        byId("results-view-button").setAttribute("aria-selected", String(resultsMode));
+        byId("graph-view-button").setAttribute("aria-selected", String(!resultsMode));
+      }
+
+      function setViewMode(mode) {
+        state.viewMode = mode === "graph" ? "graph" : "results";
+        if (state.viewMode === "results") state.selectedNodeId = "";
+        applyViewMode();
+        if (state.viewMode === "results") byId("readable-view").scrollTop = 0;
+        renderGraph();
+        renderInspector();
+      }
+
+      function graphColor(node) {
+        if (node.kind === "origin") return { fill: "#0f766e", stroke: "#075f55" };
+        if (node.kind === "goal") return { fill: "#be123c", stroke: "#9f1239" };
+        if (node.kind === "hypothesis") return { fill: "#ece5ff", stroke: "#9270d2" };
+        if (node.kind === "intent") {
+          const status = intentDisplayStatus(node);
+          if (status === "running") return { fill: "#f7c66a", stroke: "#b45309" };
+          if (status === "failed") return { fill: "#fbd1dc", stroke: "#be123c" };
+          if (status === "retry_wait") return { fill: "#dce8ff", stroke: "#2563eb" };
+          if (status === "pending") return { fill: "#e8edef", stroke: "#87989c" };
+          return { fill: "#fde3ad", stroke: "#b45309" };
+        }
+        return { fill: "#2563eb", stroke: "#1d4ed8" };
+      }
+
+      function graphLayout(nodes, edges) {
+        const levels = new Map();
+        const byNodeId = new Map(nodes.map((node) => [node.id, node]));
+        const maxDepth = 6;
+        nodes.forEach((node) => levels.set(node.id, node.kind === "origin" ? 0 : 1));
+        const flowEdges = edges.filter((edge) => !["fact_relation", "hypothesis_support"].includes(edge.kind));
+        for (let pass = 0; pass < nodes.length + 2; pass += 1) {
+          let changed = false;
+          for (const edge of flowEdges) {
+            if (!byNodeId.has(edge.source) || !byNodeId.has(edge.target)) continue;
+            const next = Math.min(maxDepth, Math.max(levels.get(edge.target) || 0, (levels.get(edge.source) || 0) + 1));
+            if (next !== levels.get(edge.target) && byNodeId.get(edge.target).kind !== "origin") {
+              levels.set(edge.target, next);
+              changed = true;
+            }
+          }
+          if (!changed) break;
+        }
+        const maxLevel = Math.max(1, ...levels.values());
+        const goal = nodes.find((node) => node.kind === "goal");
+        if (goal) levels.set(goal.id, Math.min(maxDepth + 1, Math.max(maxLevel + 1, levels.get(goal.id) || 0)));
+        const groups = new Map();
+        nodes.forEach((node) => {
+          const level = levels.get(node.id) || 0;
+          if (!groups.has(level)) groups.set(level, []);
+          groups.get(level).push(node);
+        });
+        const positions = new Map();
+        const orderedLevels = [...groups.keys()].sort((left, right) => left - right);
+        const graphWidth = Math.max(780, 180 + orderedLevels.length * 230);
+        let graphHeight = 360;
+        for (const level of orderedLevels) {
+          const group = groups.get(level);
+          group.sort((left, right) => (left.created_at || 0) - (right.created_at || 0));
+          const required = 100 + group.length * 118;
+          graphHeight = Math.max(graphHeight, required);
+          group.forEach((node, index) => {
+            const x = 105 + orderedLevels.indexOf(level) * 230;
+            const y = 72 + index * 118 + Math.max(0, (graphHeight - required) / 2);
+            positions.set(node.id, { x, y });
+          });
+        }
+        return { positions, width: graphWidth, height: graphHeight };
+      }
+
+      function nodeDimensions(node) {
+        const lines = nodeLabelLines(node.label, node.kind === "intent" ? 25 : 20, 3);
+        return { width: node.kind === "intent" ? 178 : 156, height: Math.max(42, 18 + lines.length * 15), lines };
+      }
+
+      function edgePath(source, target) {
+        const middle = source.x + (target.x - source.x) * 0.5;
+        return `M ${source.x} ${source.y} C ${middle} ${source.y}, ${middle} ${target.y}, ${target.x} ${target.y}`;
+      }
+
+      function renderGraph() {
+        graph.replaceChildren();
+        const empty = byId("graph-empty");
+        const view = state.view;
+        const projection = activeGraph(view);
+        if (!view || !projection.nodes.length) {
+          empty.textContent = state.selectedProjectId ? "暂无图谱记录" : "选择项目";
+          empty.classList.remove("hidden");
+          return;
+        }
+        empty.classList.add("hidden");
+        const nodes = enrichedGraphNodes(view);
+        const edges = projection.edges;
+        const layout = graphLayout(nodes, edges);
+        const activeWorkerByIntent = new Map(
+          activeWorkers(view)
+            .filter((worker) => worker.intentId)
+            .map((worker) => [worker.intentId, worker]),
+        );
+        graph.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+        graph.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        const defs = svgElement("defs");
+        const marker = svgElement("marker", { id: "arrow", viewBox: "0 0 10 10", refX: "8", refY: "5", markerWidth: "6", markerHeight: "6", orient: "auto-start-reverse" });
+        marker.append(svgElement("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#9bb0b4" }));
+        defs.append(marker);
+        graph.append(defs);
+        const byNodeId = new Map(nodes.map((node) => [node.id, node]));
+        for (const edge of edges) {
+          const source = layout.positions.get(edge.source);
+          const target = layout.positions.get(edge.target);
+          if (!source || !target) continue;
+          const sourceNode = byNodeId.get(edge.source);
+          const classes = ["graph-edge", edge.kind];
+          if (sourceNode && sourceNode.status === "running") classes.push("running");
+          const path = svgElement("path", { d: edgePath(source, target), class: classes.join(" ") });
+          const title = svgElement("title");
+          title.textContent = edge.relation || edge.kind.replace(/_/g, " ");
+          path.append(title);
+          graph.append(path);
+        }
+        for (const node of nodes) {
+          const position = layout.positions.get(node.id);
+          if (!position) continue;
+          const activeWorker = node.kind === "intent" ? activeWorkerByIntent.get(node.entity_id) : null;
+          const dimensions = nodeDimensions(node);
+          const colors = graphColor(node);
+          const status = node.kind === "intent" ? intentDisplayStatus(node) : node.status;
+          const group = svgElement("g", { class: `graph-node kind-${node.kind}${status ? ` kind-${status}` : ""}`, tabindex: "0", role: "button", "aria-label": node.label });
+          if (node.id === state.selectedNodeId) group.classList.add("selected");
+          if (activeWorker) group.classList.add("worker-active");
+          const title = svgElement("title");
+          title.textContent = activeWorker
+            ? `${node.label}\n${activeWorker.phase} running on ${activeWorker.workerName}\nelapsed ${durationLabel(elapsedSeconds(activeWorker.startedAt))}`
+            : node.label;
+          const rect = svgElement("rect", { x: position.x - dimensions.width / 2, y: position.y - dimensions.height / 2, width: dimensions.width, height: dimensions.height, rx: "7", fill: colors.fill, stroke: colors.stroke });
+          group.append(title, rect);
+          const text = svgElement("text", { x: position.x, y: position.y - ((dimensions.lines.length - 1) * 7), "text-anchor": "middle" });
+          dimensions.lines.forEach((line, index) => {
+            const tspan = svgElement("tspan", { x: position.x, dy: index === 0 ? "0" : "15" });
+            tspan.textContent = line;
+            text.append(tspan);
+          });
+          group.append(text);
+          const select = () => { state.selectedNodeId = node.id; renderGraph(); renderInspector(); };
+          group.addEventListener("click", select);
+          group.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); select(); }
+          });
+          graph.append(group);
+        }
+      }
+
+      function addDetailLine(parent, key, value) {
+        if (value === undefined || value === null || value === "") return;
+        const line = element("div", "detail-line");
+        line.append(element("div", "detail-key", key), element("div", "detail-value", Array.isArray(value) ? value.join(", ") : String(value)));
+        parent.append(line);
+      }
+
+      function appendSection(parent, title, content) {
+        const section = element("section", "detail-section");
+        section.append(element("h3", "", title));
+        section.append(content);
+        parent.append(section);
+      }
+
+      function recordList(records, renderRecord) {
+        const list = element("div", "record-list");
+        if (!records.length) {
+          list.append(element("div", "detail-value", "暂无记录"));
+          return list;
+        }
+        records.forEach((record) => list.append(renderRecord(record)));
+        return list;
+      }
+
+      function renderInspector() {
+        inspectorBody.replaceChildren();
+        const view = state.view;
+        if (!view) {
+          byId("inspector-mode").textContent = "项目";
+          inspectorBody.append(element("div", "notice", "等待项目数据"));
+          return;
+        }
+        const selected = enrichedGraphNodes(view).find((node) => node.id === state.selectedNodeId) || null;
+        byId("inspector-mode").textContent = selected ? statusLabel(selected.kind) : "项目";
+        inspectorBody.append(element("h2", "inspector-title", selected ? selected.label : view.project.name));
+        inspectorBody.append(element("p", "inspector-subtitle", selected ? selected.entity_id : view.project.goal));
+
+        if (selected) {
+          const details = element("div", "detail-list");
+          addDetailLine(details, "类型", statusLabel(selected.kind));
+          addDetailLine(details, "状态", selected.status && statusLabel(selected.kind === "intent" ? intentDisplayStatus(selected) : selected.status));
+          addDetailLine(details, "置信度", selected.confidence !== undefined ? `${Math.round(selected.confidence * 100)}%` : "");
+          addDetailLine(details, "Predicate", selected.predicate);
+          addDetailLine(details, "Object", selected.object);
+          addDetailLine(details, "Worker", selected.worker);
+          addDetailLine(details, "Nutrient", selected.nutrient !== undefined ? Number(selected.nutrient).toFixed(2) : "");
+          addDetailLine(details, "Strength", selected.strength !== undefined ? Number(selected.strength).toFixed(2) : "");
+          addDetailLine(details, "尝试", selected.attempts);
+          if (selected.kind === "intent") {
+            addDetailLine(details, "连续失败", selected.failure_streak);
+            if (intentRetryWaiting(selected)) {
+              addDetailLine(details, "下次重试", formatTime(retryNotBefore(selected)));
+              addDetailLine(details, "等待重试", retryDelayLabel(selected));
+            }
+          }
+          addDetailLine(details, "记忆", selected.memory_state);
+          addDetailLine(details, "下一步", selected.next_validation);
+          addDetailLine(details, "证据", selected.evidence_refs);
+          addDetailLine(details, "错误", selected.last_error);
+          addDetailLine(details, "创建", formatTime(selected.created_at));
+          appendSection(inspectorBody, "节点详情", details);
+
+          const retryable = selected.kind === "intent" && (
+            intentRetryWaiting(selected) || selected.status === "failed" || selected.status === "retry_wait"
+          );
+          if (retryable) {
+            const actions = element("div", "intent-actions");
+            const retryButton = element("button", "button primary", "立即重试");
+            retryButton.id = "retry-intent-button";
+            retryButton.type = "button";
+            const project = currentProject();
+            retryButton.disabled = !project || project.status !== "running";
+            retryButton.title = retryButton.disabled ? "项目停止后继续运行即可重试" : "清除退避时间并重新加入调度队列";
+            retryButton.addEventListener("click", () => retrySelectedIntent(selected, retryButton));
+            actions.append(retryButton);
+            appendSection(inspectorBody, "Intent 操作", actions);
+          }
+        } else {
+          const metrics = element("div", "metric-grid");
+          const entries = [
+            ["Facts", view.summary.fact_count],
+            ["Running", (view.summary.intent_status || {}).running || 0],
+            ["Evidence", (view.evidence || []).length],
+            ["Runs", (view.worker_runs || []).length],
+          ];
+          entries.forEach(([label, value]) => {
+            const metric = element("div", "metric");
+            metric.append(element("span", "metric-label", label), element("span", "metric-value", String(value)));
+            metrics.append(metric);
+          });
+          inspectorBody.append(metrics);
+          const details = element("div", "detail-list");
+          const retryingIntents = view.runtime.retrying_intents || [];
+          addDetailLine(details, "目标", view.project.target);
+          addDetailLine(details, "Goal", view.project.goal);
+          addDetailLine(details, "Dispatcher", view.runtime.dispatcher ? view.runtime.dispatcher.state : "等待");
+          addDetailLine(details, "Reason", view.runtime.dispatcher?.status?.reason_running?.worker_name || "-");
+          addDetailLine(details, "租约", view.summary.active_lease_count);
+          addDetailLine(details, "等待重试", retryingIntents.length);
+          if (view.runtime.next_retry_not_before) addDetailLine(details, "最近重试", formatTime(view.runtime.next_retry_not_before));
+          const reasonCooldown = Number(view.runtime.dispatcher?.status?.reason_cooldown_remaining || 0);
+          const reasonFailure = String(view.runtime.dispatcher?.status?.reason_failure_signature || "").trim();
+          if (reasonFailure) addDetailLine(details, "Reason error", reasonFailure.slice(0, 180));
+          if (reasonCooldown > 0) addDetailLine(details, "Reason 冷却", `${Math.ceil(reasonCooldown)} 秒后`);
+          appendSection(inspectorBody, "项目状态", details);
+        }
+
+        const runningWorkers = activeWorkers(view);
+        appendSection(inspectorBody, "Active Workers", recordList(runningWorkers, (worker) => {
+          const record = element("div", "record");
+          const heading = element("div", "record-title");
+          const chip = element("span");
+          setStatusChip(chip, worker.stale ? "stale" : "running");
+          heading.append(element("span", "", `${worker.phase} - ${worker.workerName}`), chip);
+          const details = [`elapsed ${durationLabel(elapsedSeconds(worker.startedAt))}`];
+          const heartbeatAge = elapsedSeconds(worker.heartbeatAt);
+          details.push(heartbeatAge === null ? "heartbeat pending" : `heartbeat ${durationLabel(heartbeatAge)} ago`);
+          if (worker.stale) details.push("dispatcher heartbeat stale");
+          record.append(heading, element("div", "record-value", details.join(" | ")));
+          return record;
+        }));
+
+        appendSection(inspectorBody, "最近 Evidence", recordList((view.evidence || []).slice(0, 6), (evidence) => {
+          const record = element("div", "record");
+          const heading = element("div", "record-title");
+          heading.append(element("span", "", evidence.kind), element("span", "", formatTime(evidence.created_at)));
+          record.append(heading, element("div", "record-value", shortText(evidence.evidence_ref, 120)));
+          return record;
+        }));
+
+        appendSection(inspectorBody, "Worker Runs", recordList((view.worker_runs || []).slice(0, 6), (run) => {
+          const record = element("div", "record");
+          const heading = element("div", "record-title");
+          const chip = element("span");
+          setStatusChip(chip, run.status);
+          heading.append(element("span", "", `${run.mode} · ${run.worker_name || "worker"}`), chip);
+          const note = run.errors?.length ? run.errors[run.errors.length - 1] : run.stop_reason;
+          record.append(heading, element("div", "record-value", shortText(note || `tools ${run.tool_calls || 0}`, 120)));
+          return record;
+        }));
+      }
+
+      function eventSummary(event) {
+        const payload = event.payload || {};
+        if (event.kind === "reason.intent_batch_created") {
+          const count = Number(payload.fanout_count || (payload.intent_ids || []).length || 0);
+          return payload.parallel ? `Reason 创建 ${count} 个并行分支` : `Reason 创建 ${count} 个探索方向`;
+        }
+        if (event.kind.startsWith("intent.retry")) {
+          const details = [];
+          if (payload.failure_streak !== undefined) details.push(`连续失败 ${payload.failure_streak}`);
+          if (payload.retry_not_before) details.push(`重试于 ${formatTime(payload.retry_not_before)}`);
+          if (payload.retry_delay_seconds) details.push(`${Math.ceil(Number(payload.retry_delay_seconds))} 秒后`);
+          if (payload.previous_retry_not_before) details.push("已立即重试");
+          if (payload.reason) details.push(shortText(payload.reason, 80));
+          if (payload.error) details.push(shortText(payload.error, 80));
+          return details.length ? details.join(" · ") : "Intent 重试状态更新";
+        }
+        if (payload.error) return shortText(payload.error, 130);
+        if (payload.description) return shortText(payload.description, 130);
+        if (payload.object && payload.predicate) return shortText(`${payload.predicate}: ${payload.object}`, 130);
+        if (payload.intent_id) return `Intent ${shortText(payload.intent_id, 32)}`;
+        if (payload.worker_name) return `${payload.worker_name}${payload.mode ? ` · ${payload.mode}` : ""}`;
+        if (payload.path) return shortText(payload.path, 130);
+        const values = Object.values(payload).filter((value) => typeof value === "string" || typeof value === "number");
+        return values.length ? shortText(values.join(" · "), 130) : "Blackboard 更新";
+      }
+
+      function targetForEvent(event) {
+        const payload = event.payload || {};
+        if (payload.intent_id) return `intent:${payload.intent_id}`;
+        if (payload.fact_id) return `fact:${payload.fact_id}`;
+        if (event.kind === "fact.created" && payload.id) return `fact:${payload.id}`;
+        if (event.kind === "hypothesis.created" && payload.id) return `hypothesis:${payload.id}`;
+        if (event.kind === "intent.created" && payload.id) return `intent:${payload.id}`;
+        return "";
+      }
+
+      function renderTimeline() {
+        timelineList.replaceChildren();
+        byId("event-count").textContent = `${state.events.length} 条记录`;
+        if (!state.events.length) {
+          timelineList.append(element("div", "timeline-empty", "暂无活动记录"));
+          return;
+        }
+        [...state.events].reverse().forEach((event) => {
+          const row = element("button", "timeline-row");
+          row.type = "button";
+          row.title = `${event.kind}\n${eventSummary(event)}`;
+          row.append(
+            element("span", "timeline-time", formatTime(event.created_at)),
+            element("span", "timeline-kind", event.kind),
+            element("span", "timeline-summary", eventSummary(event)),
+          );
+          row.addEventListener("click", () => {
+            const target = targetForEvent(event);
+            if (target && activeGraph(state.view).nodes.some((node) => node.id === target)) {
+              state.selectedNodeId = target;
+              renderGraph();
+              renderInspector();
+            }
+          });
+          timelineList.append(row);
+        });
+      }
+
+      function render() {
+        renderProjectList();
+        renderProjectHeader();
+        renderReadableView();
+        renderGraph();
+        renderInspector();
+        renderTimeline();
+        applyViewMode();
+      }
+
+      async function setProjectStatus(status) {
+        const project = currentProject();
+        if (!project) return;
+        try {
+          await request(`/projects/${encodeURIComponent(project.id)}/status`, {
+            method: "PUT",
+            body: JSON.stringify({ status }),
+          });
+          showToast(status === "stopped" ? "项目已停止" : "项目已继续");
+          await refresh(false);
+        } catch (error) {
+          showToast(`状态更新失败: ${error.message}`, true);
+        }
+      }
+
+      async function retrySelectedIntent(intent, button) {
+        const project = currentProject();
+        if (!project || !intent || !intent.entity_id || project.status !== "running") return;
+        button.disabled = true;
+        try {
+          await request(`/projects/${encodeURIComponent(project.id)}/intents/${encodeURIComponent(intent.entity_id)}/retry`, {
+            method: "POST",
+          });
+          showToast("Intent 已重新加入调度队列");
+          await refresh(true);
+        } catch (error) {
+          showToast(`Intent 重试失败: ${error.message}`, true);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+
+      function newProjectHints() {
+        return [...byId("new-project-hint-list").querySelectorAll(".new-project-hint-input")]
+          .map((input) => input.value.trim())
+          .filter(Boolean)
+          .map((content) => ({ content, creator: "ui" }));
+      }
+
+      function addNewProjectHint(content = "") {
+        const row = element("div", "new-project-hint-row");
+        const input = document.createElement("textarea");
+        input.className = "new-project-hint-input";
+        input.value = content;
+        input.setAttribute("aria-label", "初始 Hint");
+        const remove = element("button", "button critical hint-remove-button", "移除");
+        remove.type = "button";
+        remove.title = "移除此 Hint";
+        remove.addEventListener("click", () => row.remove());
+        row.append(input, remove);
+        byId("new-project-hint-list").append(row);
+        return input;
+      }
+
+      function updateNewProjectConfirmState() {
+        const ready = Boolean(
+          byId("new-project-name").value.trim()
+          && byId("new-project-target").value.trim()
+          && byId("new-project-goal").value.trim(),
+        );
+        byId("new-project-confirm").disabled = state.creatingProject || !ready;
+        byId("new-project-add-hint").disabled = state.creatingProject;
+      }
+
+      function openNewProjectDialog() {
+        if (state.creatingProject) return;
+        byId("new-project-name").value = "";
+        byId("new-project-target").value = "";
+        byId("new-project-goal").value = "";
+        byId("new-project-growth").checked = true;
+        byId("new-project-hint-list").replaceChildren();
+        updateNewProjectConfirmState();
+        byId("new-project-dialog-layer").classList.remove("hidden");
+        byId("new-project-name").focus();
+      }
+
+      function closeNewProjectDialog() {
+        if (state.creatingProject) return;
+        byId("new-project-dialog-layer").classList.add("hidden");
+      }
+
+      async function createNewProject() {
+        const name = byId("new-project-name").value.trim();
+        const target = byId("new-project-target").value.trim();
+        const goal = byId("new-project-goal").value.trim();
+        if (!name || !target || !goal || state.creatingProject) {
+          updateNewProjectConfirmState();
+          return;
+        }
+
+        state.creatingProject = true;
+        updateNewProjectConfirmState();
+        try {
+          const created = await request("/projects", {
+            method: "POST",
+            body: JSON.stringify({
+              name,
+              target,
+              title: name,
+              origin: target,
+              goal,
+              allowed_targets: [target],
+              bootstrap_enabled: byId("new-project-direct").checked,
+              hints: newProjectHints(),
+            }),
+          });
+          const project = created.project;
+          if (!project || !project.id) throw new Error("项目创建响应缺少项目数据");
+          state.selectedProjectId = project.id;
+          state.selectedNodeId = "";
+          state.view = null;
+          state.events = [];
+          state.eventCursor = 0;
+          state.creatingProject = false;
+          closeNewProjectDialog();
+          showToast(`项目“${project.name}”已创建`);
+          await refresh(true);
+        } catch (error) {
+          showToast(`创建项目失败: ${error.message}`, true);
+        } finally {
+          state.creatingProject = false;
+          if (!byId("new-project-dialog-layer").classList.contains("hidden")) updateNewProjectConfirmState();
+        }
+      }
+
+      function openHintDialog() {
+        const project = currentProject();
+        if (!project) return;
+        byId("hint-project-name").textContent = project.name;
+        byId("hint-content").value = "";
+        updateHintConfirmState();
+        byId("hint-dialog-layer").classList.remove("hidden");
+        byId("hint-content").focus();
+      }
+
+      function closeHintDialog() {
+        byId("hint-dialog-layer").classList.add("hidden");
+      }
+
+      function updateHintConfirmState() {
+        byId("hint-confirm").disabled = !byId("hint-content").value.trim();
+      }
+
+      async function addHint() {
+        const project = currentProject();
+        const content = byId("hint-content").value.trim();
+        if (!project || !content) {
+          updateHintConfirmState();
+          return;
+        }
+        const confirm = byId("hint-confirm");
+        confirm.disabled = true;
+        try {
+          const result = await request(`/projects/${encodeURIComponent(project.id)}/hints`, {
+            method: "POST",
+            body: JSON.stringify({ content, creator: "ui" }),
+          });
+          closeHintDialog();
+          showToast(result.created ? "Hint 已添加，Reason 将重新检查黑板" : "相同 Hint 已存在");
+          await refresh(true);
+        } catch (error) {
+          showToast(`Hint 添加失败: ${error.message}`, true);
+        } finally {
+          confirm.disabled = false;
+        }
+      }
+
+      function openReopenDialog() {
+        const project = currentProject();
+        if (!project) return;
+        byId("reopen-project-name").textContent = project.name;
+        byId("reopen-description").value = "";
+        updateReopenConfirmState();
+        byId("reopen-dialog-layer").classList.remove("hidden");
+        byId("reopen-description").focus();
+      }
+
+      function closeReopenDialog() {
+        byId("reopen-dialog-layer").classList.add("hidden");
+      }
+
+      function updateReopenConfirmState() {
+        byId("reopen-confirm").disabled = !byId("reopen-description").value.trim();
+      }
+
+      async function reopenProject() {
+        const project = currentProject();
+        const description = byId("reopen-description").value.trim();
+        if (!project || !description) {
+          updateReopenConfirmState();
+          return;
+        }
+        const confirm = byId("reopen-confirm");
+        confirm.disabled = true;
+        try {
+          await request(`/projects/${encodeURIComponent(project.id)}/reopen`, {
+            method: "POST",
+            body: JSON.stringify({ description, creator: "ui" }),
+          });
+          closeReopenDialog();
+          showToast("项目已重新打开");
+          await refresh(true);
+        } catch (error) {
+          showToast(`重新打开失败: ${error.message}`, true);
+        } finally {
+          confirm.disabled = false;
+        }
+      }
+
+      function openDeleteDialog() {
+        const project = currentProject();
+        if (!project) return;
+        state.deleteProject = { id: project.id, name: project.name };
+        byId("delete-project-name").textContent = project.name;
+        byId("delete-project-confirmation").value = "";
+        updateDeleteConfirmState();
+        byId("delete-dialog-layer").classList.remove("hidden");
+        byId("delete-project-confirmation").focus();
+      }
+
+      function closeDeleteDialog() {
+        byId("delete-dialog-layer").classList.add("hidden");
+        state.deleteProject = null;
+      }
+
+      function updateDeleteConfirmState() {
+        const confirmation = byId("delete-project-confirmation").value;
+        const project = state.deleteProject;
+        byId("delete-confirm").disabled = !project || confirmation !== project.name;
+      }
+
+      async function deleteProject() {
+        const project = state.deleteProject;
+        if (!project || byId("delete-project-confirmation").value !== project.name) {
+          updateDeleteConfirmState();
+          return;
+        }
+        const confirm = byId("delete-confirm");
+        confirm.disabled = true;
+        try {
+          await request(`/projects/${encodeURIComponent(project.id)}`, { method: "DELETE" });
+          closeDeleteDialog();
+          state.selectedProjectId = "";
+          state.selectedNodeId = "";
+          state.view = null;
+          state.events = [];
+          state.eventCursor = 0;
+          showToast(`项目“${project.name}”正在删除和清理`);
+          await refresh(true);
+        } catch (error) {
+          showToast(`删除项目失败: ${error.message}`, true);
+        } finally {
+          if (!byId("delete-dialog-layer").classList.contains("hidden")) updateDeleteConfirmState();
+        }
+      }
+
+      function openBulkDeleteDialog() {
+        const projectIds = state.projects
+          .filter((project) => state.selectedProjectIds.has(project.id))
+          .map((project) => project.id);
+        if (!projectIds.length) {
+          updateBulkDeleteControls();
+          return;
+        }
+        state.bulkDeleteProjectIds = projectIds;
+        byId("bulk-delete-count").textContent = projectIds.length;
+        byId("bulk-delete-confirmation").checked = false;
+        updateBulkDeleteConfirmState();
+        byId("bulk-delete-dialog-layer").classList.remove("hidden");
+        byId("bulk-delete-confirmation").focus();
+      }
+
+      function closeBulkDeleteDialog() {
+        byId("bulk-delete-dialog-layer").classList.add("hidden");
+        state.bulkDeleteProjectIds = [];
+        byId("bulk-delete-confirmation").checked = false;
+      }
+
+      function updateBulkDeleteConfirmState() {
+        byId("bulk-delete-confirm").disabled = !state.bulkDeleteProjectIds.length
+          || !byId("bulk-delete-confirmation").checked;
+      }
+
+      async function bulkDeleteProjects() {
+        const projectIds = [...state.bulkDeleteProjectIds];
+        if (!projectIds.length || !byId("bulk-delete-confirmation").checked) {
+          updateBulkDeleteConfirmState();
+          return;
+        }
+        const confirm = byId("bulk-delete-confirm");
+        confirm.disabled = true;
+        try {
+          const result = await request("/projects/bulk-delete", {
+            method: "POST",
+            body: JSON.stringify({ project_ids: projectIds }),
+          });
+          closeBulkDeleteDialog();
+          projectIds.forEach((projectId) => state.selectedProjectIds.delete(projectId));
+          if (projectIds.includes(state.selectedProjectId)) {
+            state.selectedProjectId = "";
+            state.selectedNodeId = "";
+            state.view = null;
+            state.events = [];
+            state.eventCursor = 0;
+          }
+          const queued = (result.accepted || []).length + (result.already_deleting || []).length;
+          const missing = (result.not_found || []).length;
+          showToast(`已提交 ${queued} 个项目清理${missing ? `，${missing} 个项目已不存在` : ""}`);
+          await refresh(true);
+        } catch (error) {
+          showToast(`批量删除失败: ${error.message}`, true);
+        } finally {
+          if (!byId("bulk-delete-dialog-layer").classList.contains("hidden")) updateBulkDeleteConfirmState();
+        }
+      }
+
+      function benchmarkStatusClass(challenge) {
+        if (challenge.is_completed) return "completed";
+        if (challenge.container_status === "available") return "running";
+        if (challenge.container_status === "pending" || challenge.container_status === "stop_pending") return "pending";
+        return "stopped";
+      }
+
+      function benchmarkPresentationKey(settings, challenges) {
+        const automation = settings?.automation || {};
+        return JSON.stringify({
+          configured: Boolean(settings?.configured),
+          base_url: settings?.base_url || "",
+          task_key: settings?.task_key || "",
+          automation: {
+            enabled: Boolean(automation.enabled),
+            status: automation.status || "",
+            active_count: automation.active_count || 0,
+            parallelism: automation.parallelism || 0,
+            completed_count: automation.completed_count || 0,
+            total_count: automation.total_count || 0,
+            queued_count: automation.queued_count || 0,
+            last_error: automation.last_error || "",
+          },
+          challenges: (challenges || []).map((challenge) => ({
+            unique_code: challenge.unique_code || "",
+            description: challenge.description || "",
+            difficulty: challenge.difficulty || "",
+            level: challenge.level ?? null,
+            total_score: challenge.total_score ?? null,
+            correct_flag_count: challenge.correct_flag_count || 0,
+            flag_count: challenge.flag_count || 0,
+            container_status: challenge.container_status || "stopped",
+            container_addr: Array.isArray(challenge.container_addr) ? challenge.container_addr : [],
+            project_id: challenge.project_id || "",
+            is_completed: Boolean(challenge.is_completed),
+          })),
+        });
+      }
+
+      function captureBenchmarkUiState(list) {
+        const body = list.closest(".dialog-body");
+        const drafts = {};
+        let focusedCode = "";
+        let selectionStart = null;
+        let selectionEnd = null;
+        list.querySelectorAll("input[data-benchmark-code]").forEach((input) => {
+          const code = input.dataset.benchmarkCode || "";
+          drafts[code] = input.value;
+          if (document.activeElement === input) {
+            focusedCode = code;
+            selectionStart = input.selectionStart;
+            selectionEnd = input.selectionEnd;
+          }
+        });
+        return {
+          drafts,
+          focusedCode,
+          selectionStart,
+          selectionEnd,
+          scrollTop: body?.scrollTop || 0,
+        };
+      }
+
+      function restoreBenchmarkUiState(list, uiState) {
+        const inputs = Array.from(list.querySelectorAll("input[data-benchmark-code]"));
+        inputs.forEach((input) => {
+          const code = input.dataset.benchmarkCode || "";
+          if (Object.prototype.hasOwnProperty.call(uiState.drafts, code)) {
+            input.value = uiState.drafts[code];
+          }
+        });
+        if (uiState.focusedCode) {
+          const focusedInput = inputs.find((input) => input.dataset.benchmarkCode === uiState.focusedCode);
+          if (focusedInput) {
+            focusedInput.focus({ preventScroll: true });
+            if (Number.isInteger(uiState.selectionStart) && Number.isInteger(uiState.selectionEnd)) {
+              focusedInput.setSelectionRange(uiState.selectionStart, uiState.selectionEnd);
+            }
+          }
+        }
+        const body = list.closest(".dialog-body");
+        if (body) body.scrollTop = uiState.scrollTop;
+      }
+
+      function renderBenchmarkChallenges() {
+        const list = byId("benchmark-list");
+        const uiState = captureBenchmarkUiState(list);
+        list.replaceChildren();
+        const settings = state.benchmarkStatus || {};
+        const automation = settings.automation || {};
+        const automationLine = byId("benchmark-automation-line");
+        const automationRunning = Boolean(automation.enabled);
+        byId("benchmark-automation-start").classList.toggle("hidden", automationRunning);
+        byId("benchmark-automation-stop").classList.toggle("hidden", !automationRunning);
+        byId("benchmark-automation-start").disabled = state.benchmarkLoading || !settings.configured;
+        byId("benchmark-automation-stop").disabled = state.benchmarkLoading;
+        automationLine.classList.toggle("error", Boolean(state.benchmarkError) || ["error", "degraded"].includes(automation.status));
+        if (automation.status === "completed") {
+          automationLine.textContent = `全部完成 · ${automation.completed_count || 0}/${automation.total_count || 0}`;
+        } else if (automationRunning) {
+          automationLine.textContent = `自动运行 · 实例 ${automation.active_count || 0}/${automation.parallelism || 3} · 完成 ${automation.completed_count || 0}/${automation.total_count || 0} · 排队 ${automation.queued_count || 0}${automation.last_error ? ` · ${automation.last_error}` : ""}`;
+        } else {
+          automationLine.textContent = automation.last_error ? `自动化已停止 · ${automation.last_error}` : "自动化未启动";
+        }
+        byId("benchmark-status-line").textContent = state.benchmarkError
+          ? `更新失败，保留上次数据 · ${state.benchmarkError}`
+          : settings.configured
+            ? `已连接 ${settings.base_url} · Task ${settings.task_key}`
+            : "尚未配置 BENCHMARK_BASE_URL / BENCHMARK_TOKEN";
+        if (state.benchmarkLoading && state.benchmarkStatus === null) {
+          list.append(element("div", "benchmark-empty", "正在读取题目与平台进度…"));
+          return;
+        }
+        if (!settings.configured) {
+          list.append(element(
+            "div",
+            "notice",
+            state.benchmarkError
+              ? "评测平台暂时读取失败，稍后会自动重试。"
+              : "请在项目 .env 中填写评测平台下发的 BENCHMARK_BASE_URL 和 BENCHMARK_TOKEN，然后重启服务。",
+          ));
+          return;
+        }
+        if (!state.benchmarkChallenges.length) {
+          list.append(element("div", "benchmark-empty", "当前任务没有题目"));
+          return;
+        }
+        state.benchmarkChallenges.forEach((challenge) => {
+          const card = element("article", "benchmark-card");
+          card.dataset.challengeCode = challenge.unique_code || "";
+          const header = element("div", "benchmark-card-header");
+          const copy = element("div");
+          copy.append(
+            element("h3", "benchmark-code", challenge.unique_code || "未命名题目"),
+            element("p", "benchmark-description", challenge.description || "平台未提供题目描述"),
+          );
+          const chip = element("span");
+          setStatusChip(chip, benchmarkStatusClass(challenge));
+          header.append(copy, chip);
+
+          const meta = element("div", "benchmark-meta");
+          const metaValues = [
+            ["难度", challenge.difficulty || "-"],
+            ["关卡", challenge.level ?? "-"],
+            ["分值", challenge.total_score ?? "-"],
+            ["Flag", `${challenge.correct_flag_count || 0}/${challenge.flag_count || 0}`],
+            ["实例", challenge.container_status || "stopped"],
+          ];
+          metaValues.forEach(([label, value]) => {
+            const item = element("span");
+            item.append(element("strong", "", `${label} `), document.createTextNode(String(value)));
+            meta.append(item);
+          });
+          card.append(header, meta);
+          if ((challenge.container_addr || []).length) {
+            card.append(element("div", "benchmark-address", challenge.container_addr.join(" · ")));
+          }
+
+          const actions = element("div", "benchmark-actions");
+          const start = element("button", "button primary", challenge.project_id ? "重启 / 同步实例" : "启动并创建项目");
+          start.type = "button";
+          start.disabled = challenge.is_completed;
+          start.addEventListener("click", () => benchmarkStart(challenge.unique_code, start));
+          actions.append(start);
+          if (challenge.project_id) {
+            const open = element("button", "button", "打开项目");
+            open.type = "button";
+            open.addEventListener("click", async () => {
+              closeBenchmarkDialog();
+              await selectProject(challenge.project_id);
+            });
+            actions.append(open);
+          }
+          const hint = element("button", "button warning", "获取 Hint（扣分）");
+          hint.type = "button";
+          hint.disabled = challenge.is_completed;
+          hint.addEventListener("click", () => benchmarkHint(challenge.unique_code, hint));
+          actions.append(hint);
+          if (["available", "pending", "stop_pending"].includes(challenge.container_status)) {
+            const close = element("button", "button critical", "关闭实例");
+            close.type = "button";
+            close.addEventListener("click", () => benchmarkClose(challenge.unique_code, close));
+            actions.append(close);
+          }
+          if (challenge.project_id && !challenge.is_completed) {
+            const form = element("div", "benchmark-submit");
+            const input = element("input", "dialog-input");
+            input.type = "text";
+            input.placeholder = "手动提交候选 Flag（AI 也会自动提交）";
+            input.setAttribute("aria-label", `${challenge.unique_code} 候选 Flag`);
+            input.dataset.benchmarkCode = challenge.unique_code || "";
+            const submit = element("button", "button primary", "提交");
+            submit.type = "button";
+            const run = () => benchmarkSubmit(challenge.unique_code, input, submit);
+            submit.addEventListener("click", run);
+            input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
+            form.append(input, submit);
+            actions.append(form);
+          }
+          card.append(actions);
+          list.append(card);
+        });
+        restoreBenchmarkUiState(list, uiState);
+      }
+
+      async function loadBenchmarkChallenges(options = {}) {
+        if (state.benchmarkLoading) return;
+        const firstLoad = state.benchmarkStatus === null;
+        const forceRender = Boolean(options.force);
+        state.benchmarkLoading = true;
+        if (firstLoad && options.showLoading) renderBenchmarkChallenges();
+        let shouldRender = firstLoad || forceRender;
+        try {
+          const nextStatus = await request("/benchmark/status");
+          const nextChallenges = nextStatus.configured
+            ? ((await request("/benchmark/challenges")).challenges || [])
+            : [];
+          const nextKey = benchmarkPresentationKey(nextStatus, nextChallenges);
+          shouldRender = shouldRender || nextKey !== state.benchmarkRenderKey || Boolean(state.benchmarkError);
+          state.benchmarkStatus = nextStatus;
+          state.benchmarkChallenges = nextChallenges;
+          state.benchmarkRenderKey = nextKey;
+          state.benchmarkError = "";
+        } catch (error) {
+          const message = String(error.message || error);
+          const errorChanged = message !== state.benchmarkError;
+          state.benchmarkError = message;
+          shouldRender = shouldRender || errorChanged;
+          if (errorChanged) showToast(`评测平台读取失败: ${message}`, true);
+        } finally {
+          state.benchmarkLoading = false;
+          if (shouldRender) renderBenchmarkChallenges();
+        }
+      }
+
+      function openBenchmarkDialog() {
+        byId("benchmark-dialog-layer").classList.remove("hidden");
+        loadBenchmarkChallenges({ showLoading: true });
+        if (state.benchmarkPollTimer === null) {
+          state.benchmarkPollTimer = window.setInterval(() => loadBenchmarkChallenges(), 3000);
+        }
+      }
+
+      function closeBenchmarkDialog() {
+        byId("benchmark-dialog-layer").classList.add("hidden");
+        if (state.benchmarkPollTimer !== null) {
+          window.clearInterval(state.benchmarkPollTimer);
+          state.benchmarkPollTimer = null;
+        }
+      }
+
+      async function benchmarkAutomationStart() {
+        const button = byId("benchmark-automation-start");
+        button.disabled = true;
+        try {
+          await request("/benchmark/automation/start", {
+            method: "POST",
+            body: JSON.stringify({ parallelism: 3 }),
+          });
+          showToast("自动化已启动，正在开启前三个未完成题目");
+          await loadBenchmarkChallenges();
+          await refresh(true);
+        } catch (error) {
+          showToast(`启动自动化失败: ${error.message}`, true);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+
+      async function benchmarkAutomationStop() {
+        const button = byId("benchmark-automation-stop");
+        button.disabled = true;
+        try {
+          await request("/benchmark/automation/stop", { method: "POST" });
+          showToast("自动化已停止，当前题目保持现状");
+          await loadBenchmarkChallenges();
+        } catch (error) {
+          showToast(`停止自动化失败: ${error.message}`, true);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+
+      async function benchmarkStart(uniqueCode, button) {
+        button.disabled = true;
+        try {
+          const result = await request(`/benchmark/challenges/${encodeURIComponent(uniqueCode)}/start`, { method: "POST" });
+          state.selectedProjectId = result.project?.id || state.selectedProjectId;
+          showToast(`题目 ${uniqueCode} 已启动，Reason 将生成并行探索分支`);
+          await loadBenchmarkChallenges();
+          await refresh(true);
+        } catch (error) {
+          showToast(`启动题目失败: ${error.message}`, true);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+
+      async function benchmarkHint(uniqueCode, button) {
+        if (!window.confirm("查看平台 Hint 会扣减该题得分，确认继续？")) return;
+        button.disabled = true;
+        try {
+          const result = await request(`/benchmark/challenges/${encodeURIComponent(uniqueCode)}/hint`, {
+            method: "POST",
+            body: JSON.stringify({ confirm_score_penalty: true }),
+          });
+          showToast(result.hint ? `Hint: ${result.hint}` : "平台没有提供 Hint");
+          await refresh(true);
+        } catch (error) {
+          showToast(`获取 Hint 失败: ${error.message}`, true);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+
+      async function benchmarkSubmit(uniqueCode, input, button) {
+        const flag = input.value.trim();
+        if (!flag) return;
+        button.disabled = true;
+        try {
+          const result = await request(`/benchmark/challenges/${encodeURIComponent(uniqueCode)}/submit`, {
+            method: "POST",
+            body: JSON.stringify({ flag }),
+          });
+          const outcome = result.outcomes?.[0] || {};
+          input.value = "";
+          showToast(outcome.correct ? "平台验证正确" : "平台判定错误，已写入黑板避免重复");
+          await loadBenchmarkChallenges();
+          await refresh(true);
+        } catch (error) {
+          showToast(`提交失败: ${error.message}`, true);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+
+      async function benchmarkClose(uniqueCode, button) {
+        button.disabled = true;
+        try {
+          await request(`/benchmark/challenges/${encodeURIComponent(uniqueCode)}/close`, { method: "POST" });
+          showToast(`题目 ${uniqueCode} 实例已关闭`);
+          await loadBenchmarkChallenges();
+          await refresh(true);
+        } catch (error) {
+          showToast(`关闭实例失败: ${error.message}`, true);
+        } finally {
+          if (button.isConnected) button.disabled = false;
+        }
+      }
+
+      byId("refresh-button").addEventListener("click", () => refresh(false));
+      byId("benchmark-button").addEventListener("click", openBenchmarkDialog);
+      byId("benchmark-automation-start").addEventListener("click", benchmarkAutomationStart);
+      byId("benchmark-automation-stop").addEventListener("click", benchmarkAutomationStop);
+      byId("benchmark-refresh").addEventListener("click", () => loadBenchmarkChallenges({ force: true }));
+      byId("benchmark-close-dialog").addEventListener("click", closeBenchmarkDialog);
+      byId("results-view-button").addEventListener("click", () => setViewMode("results"));
+      byId("graph-view-button").addEventListener("click", () => setViewMode("graph"));
+      byId("new-project-button").addEventListener("click", openNewProjectDialog);
+      byId("project-select-all").addEventListener("change", (event) => {
+        if (event.target.checked) state.projects.forEach((project) => state.selectedProjectIds.add(project.id));
+        else state.selectedProjectIds.clear();
+        renderProjectList();
+      });
+      byId("bulk-delete-button").addEventListener("click", openBulkDeleteDialog);
+      byId("bulk-delete-cancel").addEventListener("click", closeBulkDeleteDialog);
+      byId("bulk-delete-confirm").addEventListener("click", bulkDeleteProjects);
+      byId("bulk-delete-confirmation").addEventListener("change", updateBulkDeleteConfirmState);
+      byId("new-project-cancel").addEventListener("click", closeNewProjectDialog);
+      byId("new-project-confirm").addEventListener("click", createNewProject);
+      byId("new-project-add-hint").addEventListener("click", () => {
+        if (!state.creatingProject) addNewProjectHint();
+      });
+      byId("new-project-name").addEventListener("input", updateNewProjectConfirmState);
+      byId("new-project-target").addEventListener("input", updateNewProjectConfirmState);
+      byId("new-project-goal").addEventListener("input", updateNewProjectConfirmState);
+      byId("hint-button").addEventListener("click", openHintDialog);
+      byId("stop-button").addEventListener("click", () => setProjectStatus("stopped"));
+      byId("resume-button").addEventListener("click", () => setProjectStatus("running"));
+      byId("reopen-button").addEventListener("click", openReopenDialog);
+      byId("delete-button").addEventListener("click", openDeleteDialog);
+      byId("reopen-cancel").addEventListener("click", closeReopenDialog);
+      byId("reopen-confirm").addEventListener("click", reopenProject);
+      byId("reopen-description").addEventListener("input", updateReopenConfirmState);
+      byId("hint-cancel").addEventListener("click", closeHintDialog);
+      byId("hint-confirm").addEventListener("click", addHint);
+      byId("hint-content").addEventListener("input", updateHintConfirmState);
+      byId("delete-cancel").addEventListener("click", closeDeleteDialog);
+      byId("delete-confirm").addEventListener("click", deleteProject);
+      byId("delete-project-confirmation").addEventListener("input", updateDeleteConfirmState);
+      byId("reopen-dialog-layer").addEventListener("click", (event) => { if (event.target === byId("reopen-dialog-layer")) closeReopenDialog(); });
+      byId("hint-dialog-layer").addEventListener("click", (event) => { if (event.target === byId("hint-dialog-layer")) closeHintDialog(); });
+      byId("delete-dialog-layer").addEventListener("click", (event) => { if (event.target === byId("delete-dialog-layer")) closeDeleteDialog(); });
+      byId("bulk-delete-dialog-layer").addEventListener("click", (event) => { if (event.target === byId("bulk-delete-dialog-layer")) closeBulkDeleteDialog(); });
+      byId("new-project-dialog-layer").addEventListener("click", (event) => { if (event.target === byId("new-project-dialog-layer")) closeNewProjectDialog(); });
+      byId("benchmark-dialog-layer").addEventListener("click", (event) => { if (event.target === byId("benchmark-dialog-layer")) closeBenchmarkDialog(); });
+      document.addEventListener("keydown", (event) => { if (event.key === "Escape") { closeNewProjectDialog(); closeReopenDialog(); closeHintDialog(); closeDeleteDialog(); closeBulkDeleteDialog(); closeBenchmarkDialog(); } });
+      window.setInterval(() => refresh(false), 5000);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(false); });
+      refresh(true);
+    })();
+  </script>
+</body>
+</html>
