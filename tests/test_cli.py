@@ -67,17 +67,8 @@ class CliTests(unittest.TestCase):
             build_parser().parse_args(["up"])
         self.assertEqual(raised.exception.code, 2)
 
-    def test_parser_keeps_windows_and_posix_option_spellings(self):
-        legacy = self.args(
-            "retry",
-            "-Name",
-            "fixture",
-            "-IntentId",
-            "intent-1",
-            "-BaseUrl",
-            "http://api:9000",
-        )
-        modern = self.args(
+    def test_parser_accepts_standard_long_options(self):
+        parsed = self.args(
             "retry",
             "--name",
             "fixture",
@@ -86,9 +77,9 @@ class CliTests(unittest.TestCase):
             "--base-url",
             "http://api:9000",
         )
-        self.assertEqual(legacy.name, modern.name)
-        self.assertEqual(legacy.intent_id, modern.intent_id)
-        self.assertEqual(legacy.base_url, modern.base_url)
+        self.assertEqual(parsed.name, "fixture")
+        self.assertEqual(parsed.intent_id, "intent-1")
+        self.assertEqual(parsed.base_url, "http://api:9000")
 
     def test_base_url_uses_environment_then_explicit_option(self):
         with patch.dict(os.environ, {"SLIME_API_URL": "http://api:8080"}):

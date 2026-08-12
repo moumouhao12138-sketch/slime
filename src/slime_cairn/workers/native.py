@@ -350,7 +350,7 @@ class NativeAgentMind:
                     temporary.unlink(missing_ok=True)
 
     def _write_prompt_file(self, state: NativeSessionState, prompt: str) -> str:
-        """Persist a model prompt so it never crosses the Windows host argv boundary."""
+        """Persist a model prompt so large graphs stay out of host argv."""
 
         path = state.directory / "prompt.txt"
         temporary = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
@@ -1545,10 +1545,8 @@ fi
             else:
                 claude_argv.extend(["--session-id", state.session_id])
             prompt_file = self._write_prompt_file(state, prompt)
-            # Cairn passes prompts through the Docker API. On Windows this
-            # runtime reaches the same container through docker.exe, whose
-            # command line is bounded, so Claude reads the mounted prompt from
-            # stdin instead of receiving the complete graph as one argv item.
+            # Claude reads the mounted prompt from stdin instead of receiving
+            # the complete graph as one bounded argv item.
             script = 'prompt_file="$1"\nshift\nexec "$@" < "$prompt_file"\n'
             return [
                 "/bin/sh",
@@ -1595,9 +1593,8 @@ fi
                     "-C",
                     state.container_directory,
                 ]
-            # Cairn sends container exec requests through the Docker API, which
-            # bypasses the host command-line limit. This runtime uses docker.exe
-            # on Windows, so feed the prompt from the mounted workspace instead.
+            # Feed the prompt from the mounted workspace to avoid host command-
+            # line limits for large graph snapshots.
             script = 'prompt_file="$1"\nshift\nexec "$@" - < "$prompt_file"\n'
             return [
                 "/bin/sh",
@@ -1632,8 +1629,7 @@ fi
         if state.resume_session:
             argv.extend(["--session", state.session_id])
         # Pi expands @file arguments itself. Keeping only the mounted path in
-        # docker.exe argv avoids the Windows command-line size boundary while
-        # preserving the complete task prompt inside the project workspace.
+        # argv avoids command-line size limits while preserving the full prompt.
         argv.extend(["-p", f"@{prompt_file}"])
         if self.config.model_endpoint is not None:
             return self._wrap_explicit_pi_provider(state, argv)

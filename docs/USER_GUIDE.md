@@ -11,13 +11,6 @@
 ./slime ui
 ```
 
-Windows 使用：
-
-```powershell
-.\slime.cmd up
-.\slime.cmd ui
-```
-
 默认 UI 地址为 <http://127.0.0.1:8000/>。页面用于创建项目、浏览图结构、查看 Fact、Intent、Evidence、Worker Run 和事件，以及添加人工 Hint。
 
 ## 2. 创建项目
@@ -38,12 +31,6 @@ Windows 使用：
 | `--target` | 目标地址或目标标识，同时作为默认允许范围 |
 | `--goal` | 明确的完成条件和预期结果 |
 | `--start-mode` | `growth` 或 `direct` |
-
-Windows 也支持相同的长参数：
-
-```powershell
-.\slime.cmd new --name demo --target https://target.example/ --goal "完成目标" --start-mode growth
-```
 
 ### 启动模式
 

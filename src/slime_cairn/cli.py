@@ -365,25 +365,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("command", nargs="?", choices=COMMANDS, default="help")
-    parser.add_argument("-Name", "--name", default="ctf-test", help="project name")
-    parser.add_argument("-Target", "--target", default="", help="project target")
-    parser.add_argument("-Goal", "--goal", default=DEFAULT_GOAL, help="project goal")
+    parser.add_argument("--name", default="ctf-test", help="project name")
+    parser.add_argument("--target", default="", help="project target")
+    parser.add_argument("--goal", default=DEFAULT_GOAL, help="project goal")
     parser.add_argument(
-        "-StartMode",
         "--start-mode",
         choices=("growth", "direct"),
         default="growth",
         help="create with Reason growth or a bootstrap Intent",
     )
-    parser.add_argument("-IntentId", "--intent-id", default="", help="Intent to retry")
+    parser.add_argument("--intent-id", default="", help="Intent to retry")
     parser.add_argument(
-        "-BaseUrl",
         "--base-url",
         default=os.environ.get("SLIME_API_URL", DEFAULT_API_URL),
         help=f"API URL (default: SLIME_API_URL or {DEFAULT_API_URL})",
     )
     parser.add_argument(
-        "-Timeout",
         "--timeout",
         type=_positive_timeout,
         default=10.0,

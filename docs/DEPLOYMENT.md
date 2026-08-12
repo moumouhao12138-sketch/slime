@@ -23,15 +23,6 @@ Dispatcher 挂载 `/var/run/docker.sock`。因此运行 Dispatcher 的身份具�
 
 ## 2. 前置条件
 
-### Windows
-
-- Windows 10/11 或 Windows Server
-- Docker Desktop，使用 Linux Containers
-- Docker Compose v2
-- PowerShell 或 CMD
-
-### Linux
-
 - 现代 Linux 发行版
 - Docker Engine
 - Docker Compose v2 插件
@@ -56,15 +47,6 @@ cd slime
 
 ### 3.2 创建环境配置
 
-Windows：
-
-```powershell
-Copy-Item .env.example .env
-notepad .env
-```
-
-Linux：
-
 ```sh
 cp .env.example .env
 ${EDITOR:-vi} .env
@@ -84,21 +66,13 @@ SLIME_CODEX_REASONING_EFFORT=xhigh
 
 ### 3.3 启动
 
-Windows：
-
-```powershell
-.\slime.cmd up
-.\slime.cmd ps
-```
-
-Linux：
-
 ```sh
 ./slime up
 ./slime ps
 ```
 
-`up` 使用 Compose 中固定的预构建镜像；镜像本地不存在时，Compose 会从仓库获取，无法获取时可以改用本地构建方式。
+`up` 会构建当前工作树中的应用和 Worker 镜像，并强制重建全部 Compose
+服务。修改源码、Prompt 或 `AGENTS.md` 后，直接再次执行 `up` 即可生效。
 
 若没有提前创建 `.env`，启动器会从 `.env.example` 创建它并以退出码 `2` 停止。填写配置后再次执行 `up`。
 
@@ -108,8 +82,6 @@ Linux：
 ./slime ps
 ./slime logs api dispatcher
 ```
-
-Windows 将 `./slime` 替换为 `.\slime.cmd`。
 
 默认检查地址：
 
@@ -123,16 +95,16 @@ Health   http://127.0.0.1:8000/health
 
 ## 4. 日常管理
 
-| Linux 命令 | Windows 命令 | 作用 |
-|---|---|---|
-| `./slime up` | `.\slime.cmd up` | 创建或更新并启动服务 |
-| `./slime down` | `.\slime.cmd down` | 停止 Compose 服务，保留数据 |
-| `./slime restart` | `.\slime.cmd restart` | 重启服务 |
-| `./slime pull` | `.\slime.cmd pull` | 拉取应用和 Worker 镜像 |
-| `./slime build` | `.\slime.cmd build` | 从当前源码构建镜像 |
-| `./slime logs -f` | `.\slime.cmd logs -f` | 持续查看日志 |
-| `./slime ps` | `.\slime.cmd ps` | 查看服务状态 |
-| `./slime shell` | `.\slime.cmd shell` | 进入 API 容器 |
+| 命令 | 作用 |
+|---|---|
+| `./slime up` | 构建当前源码并重建全部服务 |
+| `./slime down` | 停止 Compose 服务，保留数据 |
+| `./slime restart` | 快速重启现有服务，不重新构建 |
+| `./slime pull` | 拉取应用和 Worker 镜像 |
+| `./slime build` | 从当前源码构建镜像 |
+| `./slime logs -f` | 持续查看日志 |
+| `./slime ps` | 查看服务状态 |
+| `./slime shell` | 进入 API 容器 |
 
 查看单个服务日志：
 
@@ -149,11 +121,10 @@ Health   http://127.0.0.1:8000/health
 
 ## 5. 使用本地源码构建
 
-当预构建镜像不可用，或需要验证本地修改时：
+`up` 已包含本地构建。需要只构建、不启动服务时执行：
 
 ```sh
 ./slime build
-./slime up
 ```
 
 构建参数来自 `.env`：
@@ -208,13 +179,6 @@ docker run --rm \
   --mount type=volume,src=slime-workspaces,dst=/source,readonly \
   --mount type=bind,src="$PWD",dst=/backup \
   alpine tar -czf /backup/slime-workspaces.tar.gz -C /source .
-```
-
-PowerShell 使用以下等价命令：
-
-```powershell
-docker run --rm --mount type=volume,src=slime-data,dst=/source,readonly --mount "type=bind,src=$($PWD.Path),dst=/backup" alpine tar -czf /backup/slime-data.tar.gz -C /source .
-docker run --rm --mount type=volume,src=slime-workspaces,dst=/source,readonly --mount "type=bind,src=$($PWD.Path),dst=/backup" alpine tar -czf /backup/slime-workspaces.tar.gz -C /source .
 ```
 
 备份应同时保存 `.env` 和 `dispatch.json`，并采用单独的凭据保护措施。

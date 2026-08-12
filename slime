@@ -16,7 +16,7 @@ case "$command" in
             printf '%s\n' 'Created .env. Fill in the model provider values, then run ./slime up again.' >&2
             exit 2
         fi
-        exec docker compose up -d --remove-orphans "$@"
+        exec docker compose up -d --build --force-recreate --remove-orphans "$@"
         ;;
     down|restart|logs|ps)
         exec docker compose "$command" "$@"
@@ -41,7 +41,7 @@ case "$command" in
 Usage: ./slime COMMAND [ARGS...]
 
 Compose commands:
-  up       Start API and dispatcher in the background
+  up       Build current sources and recreate all services
   down     Stop services and keep persistent data
   restart  Restart running services
   pull     Pull application and Worker images

@@ -318,7 +318,7 @@ class AgentConfigMount:
 
     @property
     def docker_mount(self) -> str:
-        """Render Docker's long bind-mount form, which handles Windows source paths."""
+        """Render Docker's explicit long bind-mount form."""
 
         return f"type=bind,source={self.source},target={self.target},readonly"
 
@@ -381,18 +381,11 @@ class PersistentDockerBackend:
         uid = int(match.group(1))
         gid = int(match.group(2) or match.group(1))
         paths = [candidate, *candidate.rglob("*")]
-        if os.name == "posix":
-            try:
-                for item in paths:
-                    os.chown(item, uid, gid, follow_symlinks=False)
-            except OSError as exc:
-                raise RuntimeError(f"failed to assign Worker workspace ownership: {exc}") from exc
-            return
-
-        # Windows tests cannot change uid/gid. Keep the tree writable so path
-        # validation and named-volume command construction remain testable.
-        for item in paths:
-            item.chmod(0o700 if item.is_dir() else 0o600)
+        try:
+            for item in paths:
+                os.chown(item, uid, gid, follow_symlinks=False)
+        except OSError as exc:
+            raise RuntimeError(f"failed to assign Worker workspace ownership: {exc}") from exc
 
     def create_command(self) -> list[str]:
         workspace_mount = f"{self.workspace_root}:/workspace:rw"

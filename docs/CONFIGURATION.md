@@ -17,12 +17,6 @@ Compose 将 `SLIME_DISPATCH_FILE` 指向的文件只读挂载到 Dispatcher 的 
 cp .env.example .env
 ```
 
-Windows：
-
-```powershell
-Copy-Item .env.example .env
-```
-
 ### 1.1 默认 Codex Worker
 
 | 变量 | 必填 | 说明 |
