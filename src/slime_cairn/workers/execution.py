@@ -263,13 +263,13 @@ class DockerExecProcess:
 class DockerWorkerConfig:
     image: str = DEFAULT_WORKER_IMAGE
     docker_binary: str = "docker"
-    network: str = "bridge"
+    network: str = "host"
     # Match Cairn's unrestricted resource defaults. Operators can explicitly
     # add any Docker limit in the container configuration.
     memory: str | None = DEFAULT_CONTAINER_MEMORY
     cpus: str | None = DEFAULT_CONTAINER_CPUS
     pids_limit: int | None = DEFAULT_CONTAINER_PIDS_LIMIT
-    user: str = "65532:65532"
+    user: str = "1000:1000"
     init: bool = True
 
 
@@ -355,7 +355,7 @@ class PersistentDockerConfig(DockerWorkerConfig):
 
 
 class PersistentDockerBackend:
-    """Keeps one low-privilege container alive so pseudopods can reuse tools and files."""
+    """Keeps one persistent Kali workstation alive per project."""
 
     def __init__(self, workspace_root: Path, config: PersistentDockerConfig | None = None) -> None:
         self.workspace_root = workspace_root.resolve()
@@ -394,9 +394,6 @@ class PersistentDockerBackend:
             "create",
             "--name", self.config.container_name,
             "--network", self.config.network,
-            "--read-only",
-            "--cap-drop", "ALL",
-            "--security-opt", "no-new-privileges",
             "--user", self.config.user,
         ]
         if self.config.pids_limit is not None:
@@ -498,7 +495,7 @@ class PersistentDockerBackend:
             self.config.docker_binary,
             "inspect",
             "--format",
-            "{{json .HostConfig}}",
+            '{"HostConfig":{{json .HostConfig}},"User":{{json .Config.User}}}',
             self.config.container_name,
         ]
 

@@ -116,12 +116,11 @@ Codex、Pi、Claude 等 Worker 名称表示 Agent 适配器和调度容量，不
 
 默认容器属性：
 
-- 用户 `65532:65532`；
-- 只读根文件系统；
+- `kali` 用户，UID/GID 为 `1000:1000`，可免密使用 `sudo`；
+- 根文件系统可写，工具可以在任务期间安装和更新；
 - `/tmp` 使用项目容器的 Docker overlay 存储，不单独挂载 tmpfs；
-- `no-new-privileges`；
-- 丢弃全部 capability；
-- `standard` Profile 使用 `bridge` 网络；
+- 保留 Docker 默认 capability；
+- `standard` Profile 使用 `host` 网络；
 - 不设置 CPU、内存和 PID 上限。
 
 资源限制是项目容器级配置。同一项目的多个任务共同使用该容器获得的资源。

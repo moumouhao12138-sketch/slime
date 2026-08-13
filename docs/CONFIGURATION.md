@@ -95,7 +95,7 @@ Pi 使用 OpenAI Chat Completions 兼容接口。Claude 使用 `ANTHROPIC_*` 环
 | `SLIME_KALI_APT_MIRROR` | `http://http.kali.org/kali` |
 | `SLIME_KALI_APT_VERIFY_PEER` | `true` |
 | `SLIME_INSTALL_NATIVE_AGENTS` | `true` |
-| `SLIME_INSTALL_REFERENCE_ASSETS` | `false` |
+| `SLIME_INSTALL_REFERENCE_ASSETS` | `true` |
 
 ### 1.6 可选 Benchmark 集成
 
@@ -152,11 +152,10 @@ BENCHMARK_AUTOMATION_INTERVAL=3
 
 Worker 的其他固定运行属性：
 
-- UID/GID 为 `65532:65532`；
-- 根文件系统只读；
+- 使用 `kali` 用户，UID/GID 为 `1000:1000`，可免密使用 `sudo`；
+- 根文件系统可写；
 - `/tmp` 使用项目容器的 Docker overlay 存储，不设独立容量上限；
-- `no-new-privileges`；
-- 默认丢弃全部 Linux capability；
+- 保留 Docker 默认 Linux capability；
 - `/workspace` 挂载到 `slime-workspaces` 中该项目的 `volume-subpath`。
 
 ### 2.2 容量配置
@@ -315,8 +314,8 @@ src/slime_cairn/protocol/prompts/default/
 
 | Profile | Docker 网络 | 增加 capability | 说明 |
 |---|---|---|---|
-| `standard` | `bridge` | 无 | 默认，具有普通出站网络 |
-| `raw-network` | `bridge` | `NET_RAW` | 需要原始网络数据包时使用 |
+| `standard` | `host` | Docker 默认值 | 默认，与 Cairn 的 Worker 网络一致 |
+| `raw-network` | `host` | Docker 默认值 + `NET_RAW` | 显式声明原始网络数据包能力 |
 | `lab-network-admin` | `slime-lab` | `NET_RAW`、`NET_ADMIN` | 使用 Compose 创建的独立实验网络 |
 
 通过 `.env` 选择：

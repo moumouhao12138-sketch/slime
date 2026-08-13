@@ -33,7 +33,10 @@ slime-cairn-api = "slime_cairn.server.api:main"
 slime-cairn-service = "slime_cairn.dispatcher.main:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = [
+    "hatchling==1.32.0",
+    "trove-classifiers==2026.6.1.19",
+]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

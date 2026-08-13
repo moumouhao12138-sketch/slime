@@ -32,11 +32,28 @@ DEFINITIONS = [
     ("exiftool", "forensics", False, []),
     ("tshark", "forensics", False, ["NET_RAW"]),
     ("tcpdump", "network", False, ["NET_RAW"]),
+    ("naabu", "network", False, ["NET_RAW"]),
+    ("ncat", "network", False, []),
+    ("chisel", "network", False, []),
     ("john", "password", False, []),
     ("hashcat", "password", False, []),
     ("hydra", "password", False, []),
     ("python3", "scripting", False, []),
     ("tmux", "session", True, []),
+    ("katana", "web", False, []),
+    ("dalfox", "web", False, []),
+    ("bloodyAD", "active-directory", False, []),
+    ("coercer", "active-directory", False, []),
+    ("enum4linux-ng", "active-directory", False, []),
+    ("netexec", "active-directory", False, []),
+    ("kerbrute", "active-directory", False, []),
+    ("cloudfox", "cloud", False, []),
+    ("gitleaks", "secrets", False, []),
+    ("adb", "mobile", False, []),
+    ("playwright-cli", "browser", True, []),
+    ("codex", "agent", True, []),
+    ("claude", "agent", True, []),
+    ("pi", "agent", True, []),
 ]
 
 
@@ -73,4 +90,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

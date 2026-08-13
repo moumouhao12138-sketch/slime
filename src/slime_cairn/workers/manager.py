@@ -75,11 +75,10 @@ class ContainerResourceLimits:
         )
 
 
-STANDARD_PROFILE = WorkerProfile("standard", DEFAULT_WORKER_IMAGE, "bridge")
-# Native model CLIs and remote CTF fixtures both need ordinary outbound
-# connectivity.  The private ``slime-lab`` network is intentionally
-# internal, so it belongs only to the explicit lab-admin profile below.
-RAW_NETWORK_PROFILE = WorkerProfile("raw-network", DEFAULT_WORKER_IMAGE, "bridge", ("NET_RAW",))
+STANDARD_PROFILE = WorkerProfile("standard", DEFAULT_WORKER_IMAGE, "host")
+# Match Cairn's direct host networking for ordinary and raw-network CTF work.
+# The private ``slime-lab`` network remains available as an explicit profile.
+RAW_NETWORK_PROFILE = WorkerProfile("raw-network", DEFAULT_WORKER_IMAGE, "host", ("NET_RAW",))
 LAB_NETWORK_ADMIN_PROFILE = WorkerProfile(
     "lab-network-admin",
     DEFAULT_WORKER_IMAGE,
@@ -412,17 +411,29 @@ class WorkerManager:
     @classmethod
     def _runtime_matches(cls, backend: PersistentDockerBackend, raw_host_config: str) -> bool:
         try:
-            host = json.loads(raw_host_config)
+            runtime = json.loads(raw_host_config)
         except (TypeError, json.JSONDecodeError):
             return False
-        if not isinstance(host, dict):
+        if not isinstance(runtime, dict):
             return False
+        host = runtime.get("HostConfig")
+        user = runtime.get("User")
+        if not isinstance(host, dict) or not isinstance(user, str):
+            return False
+        cap_add = {str(item).upper() for item in (host.get("CapAdd") or [])}
+        expected_cap_add = {item.upper() for item in backend.config.cap_add}
+        security_options = {str(item).lower() for item in (host.get("SecurityOpt") or [])}
         return (
-            bool(host.get("Init")) == bool(backend.config.init)
+            user == backend.config.user
+            and bool(host.get("Init")) == bool(backend.config.init)
             and int(host.get("PidsLimit") or 0) == int(backend.config.pids_limit or 0)
             and int(host.get("Memory") or 0) == cls._memory_bytes(backend.config.memory)
             and int(host.get("NanoCpus") or 0)
             == (0 if backend.config.cpus is None else int(float(backend.config.cpus) * 1_000_000_000))
+            and not bool(host.get("ReadonlyRootfs"))
+            and not (host.get("CapDrop") or [])
+            and cap_add == expected_cap_add
+            and not any(option.startswith("no-new-privileges") for option in security_options)
             # Cairn uses the container overlay for /tmp. Containers created by
             # older Slime releases carried a 128MB tmpfs and must be recreated
             # once so provider CLIs cannot keep hitting ENOSPC.
@@ -452,6 +463,10 @@ class WorkerManager:
         """Idempotently reuse, start, or create the persistent project container."""
 
         backend = self.backend_for(project_id, profile)
+        # Named-volume projects created by older releases may still belong to
+        # the previous Worker UID. Migrate the complete project subtree before
+        # any create/start path exposes it to the current non-root Kali user.
+        backend.prepare_writable_path(backend.workspace_root)
         plan = self.lifecycle_plan(project_id, profile)
         inspected = executor(plan["inspect"])
         if inspected.exit_code == 0:

@@ -129,7 +129,7 @@ Compose 服务。因此修改源码、默认 Prompt 或 `AGENTS.md` 后无需先
 
 `tasks.reason.max_intents` 控制一次推理可以生成多少个新分支，不等于同时执行多少个分支。实际并发同时受全局、项目和 Worker 三层上限约束。
 
-默认 `standard` Profile 使用 Docker `bridge` 网络，不增加 Linux capability。默认不设置 CPU、内存和 PID 上限，Worker 进程以 UID/GID `65532:65532` 运行。需要限制资源时，在 `dispatch.json` 的 `container` 段显式配置。
+默认 `standard` Profile 与 Cairn 一样使用 Docker `host` 网络。Worker 是完整、可写的 Kali 工作站，以 `kali` 用户（UID/GID `1000:1000`）运行并可免密使用 `sudo`；默认不设置 CPU、内存和 PID 上限。需要限制资源时，在 `dispatch.json` 的 `container` 段显式配置。
 
 默认关闭启动阶段的模型探针，避免上游短暂余额或网络故障导致 Dispatcher 重启；任务仍会记录模型调用错误。需要启动即阻断时，将 `runtime.worker_healthcheck` 改为 `startup_only`。
 

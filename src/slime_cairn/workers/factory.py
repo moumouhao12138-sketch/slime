@@ -124,7 +124,6 @@ class DockerCairnRuntimeFactory:
         workspace = IsolatedWorkspace(backend.workspace_root)
         (workspace.root / "shared").mkdir(parents=True, exist_ok=True)
         agent_homes = self.manager.project_agent_homes(project.id, self.profile)
-        backend.prepare_writable_path(workspace.root)
         lifecycle = self.manager.ensure_started(project.id, self.executor, self.profile)
         self.board.add_event(
             project.id,

@@ -80,7 +80,7 @@ services:
         KALI_APT_MIRROR: ${SLIME_KALI_APT_MIRROR:-http://http.kali.org/kali}
         KALI_APT_VERIFY_PEER: ${SLIME_KALI_APT_VERIFY_PEER:-true}
         INSTALL_NATIVE_AGENTS: ${SLIME_INSTALL_NATIVE_AGENTS:-true}
-        INSTALL_REFERENCE_ASSETS: ${SLIME_INSTALL_REFERENCE_ASSETS:-false}
+        INSTALL_REFERENCE_ASSETS: ${SLIME_INSTALL_REFERENCE_ASSETS:-true}
     command:
       - "true"
     restart: "no"

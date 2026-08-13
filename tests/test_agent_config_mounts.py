@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -25,8 +26,24 @@ from slime_cairn.workers.manager import (
 
 
 class AgentConfigMountTests(unittest.TestCase):
-    def test_standard_profile_has_upstream_network_without_extra_capabilities(self):
-        self.assertEqual(STANDARD_PROFILE.network, "bridge")
+    @staticmethod
+    def runtime_config(**overrides: object) -> str:
+        host: dict[str, object] = {
+            "Init": True,
+            "PidsLimit": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "ReadonlyRootfs": False,
+            "CapDrop": None,
+            "CapAdd": None,
+            "SecurityOpt": None,
+            "Tmpfs": None,
+        }
+        host.update(overrides)
+        return json.dumps({"HostConfig": host, "User": "1000:1000"}) + "\n"
+
+    def test_standard_profile_matches_cairn_host_network(self):
+        self.assertEqual(STANDARD_PROFILE.network, "host")
         self.assertEqual(STANDARD_PROFILE.capabilities, ())
 
     def test_disabled_agent_mounts_do_not_require_host_configuration(self):
@@ -130,7 +147,7 @@ class AgentConfigMountTests(unittest.TestCase):
             self.assertEqual(mounts[0].source, (root / "profiles" / "codex").resolve())
             self.assertEqual(mounts[2].target, "/host-agent-config/pi")
 
-    def test_persistent_container_renders_read_only_mounts(self):
+    def test_persistent_container_has_writable_root_and_read_only_config_mounts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             codex_home = root / "codex-home"
@@ -150,7 +167,11 @@ class AgentConfigMountTests(unittest.TestCase):
                 command[mount_index + 1],
                 f"type=bind,source={codex_home.resolve()},target=/host-agent-config/codex,readonly",
             )
-            self.assertIn("--read-only", command)
+            self.assertNotIn("--read-only", command)
+            self.assertNotIn("--cap-drop", command)
+            self.assertNotIn("--security-opt", command)
+            self.assertEqual(command[command.index("--network") + 1], "host")
+            self.assertEqual(command[command.index("--user") + 1], "1000:1000")
 
     def test_persistent_container_mounts_one_named_volume_subdirectory(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -179,14 +200,14 @@ class AgentConfigMountTests(unittest.TestCase):
                     pid_path, container_pid_path = backend._pid_file()
                 chown.assert_any_call(
                     nested.resolve(),
-                    65532,
-                    65532,
+                    1000,
+                    1000,
                     follow_symlinks=False,
                 )
                 chown.assert_any_call(
                     pid_path.parent.resolve(),
-                    65532,
-                    65532,
+                    1000,
+                    1000,
                     follow_symlinks=False,
                 )
             else:
@@ -280,6 +301,30 @@ class AgentConfigMountTests(unittest.TestCase):
             self.assertIn(DEFAULT_WORKER_IMAGE, create)
             self.assertIn(f"{backend.workspace_root}:/workspace:rw", create)
 
+    def test_ensure_started_migrates_named_volume_workspace_ownership(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = WorkerManager(
+                Path(temporary) / "workspaces",
+                workspace_volume="slime-workspaces",
+            )
+            backend = manager.backend_for("legacy-owner")
+            nested = backend.workspace_root / "shared" / "artifact.txt"
+            nested.parent.mkdir(parents=True)
+            nested.write_text("fixture", encoding="utf-8")
+
+            with patch.object(backend, "prepare_writable_path") as prepare:
+                status = manager.ensure_started(
+                    "legacy-owner",
+                    lambda command: (
+                        CommandExecution(1, "", "missing")
+                        if command[1] == "inspect"
+                        else CommandExecution(0, "", "")
+                    ),
+                )
+
+            self.assertEqual(status, "created")
+            prepare.assert_called_once_with(backend.workspace_root)
+
     def test_real_runtime_recreates_container_when_same_tag_points_to_new_image(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -296,13 +341,7 @@ class AgentConfigMountTests(unittest.TestCase):
                     if command[3] == "{{.Image}}":
                         return CommandExecution(0, "sha256:old\n", "")
                     if command[3] == "{{.HostConfig.NetworkMode}}":
-                        return CommandExecution(0, "bridge\n", "")
-                    if command[3] == "{{json .HostConfig}}":
-                        return CommandExecution(
-                            0,
-                            '{"Init":true,"PidsLimit":0,"Memory":0,"NanoCpus":0}\n',
-                            "",
-                        )
+                        return CommandExecution(0, "host\n", "")
                 if command[1:3] == ["image", "inspect"]:
                     return CommandExecution(0, "sha256:new\n", "")
                 return CommandExecution(0, "", "")
@@ -314,14 +353,14 @@ class AgentConfigMountTests(unittest.TestCase):
             self.assertTrue(any(command[1:3] == ["image", "inspect"] for command in calls))
             self.assertEqual([command[1] for command in calls][-3:], ["rm", "create", "start"])
 
-    def test_raw_network_profile_uses_bridge_and_lab_admin_stays_internal(self):
+    def test_raw_network_profile_uses_host_and_lab_admin_stays_internal(self):
         with tempfile.TemporaryDirectory() as temporary:
             manager = WorkerManager(Path(temporary) / "workspaces", lab_network="fixture-lab")
 
             raw = manager.backend_for("raw-project", RAW_NETWORK_PROFILE)
             lab = manager.backend_for("lab-project", LAB_NETWORK_ADMIN_PROFILE)
 
-            self.assertEqual(raw.config.network, "bridge")
+            self.assertEqual(raw.config.network, "host")
             self.assertEqual(lab.config.network, "fixture-lab")
 
     def test_existing_container_is_recreated_when_network_profile_changes(self):
@@ -348,7 +387,7 @@ class AgentConfigMountTests(unittest.TestCase):
                 [command[1] for command in calls],
                 ["inspect", "inspect", "inspect", "rm", "create", "start"],
             )
-            self.assertIn("bridge", calls[-2])
+            self.assertIn("host", calls[-2])
 
     def test_existing_container_is_recreated_when_runtime_limits_are_stale(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -364,11 +403,15 @@ class AgentConfigMountTests(unittest.TestCase):
                     if command[3] == "{{.Config.Image}}":
                         return CommandExecution(0, f"{DEFAULT_WORKER_IMAGE}\n", "")
                     if command[3] == "{{.HostConfig.NetworkMode}}":
-                        return CommandExecution(0, "bridge\n", "")
-                    if command[3] == "{{json .HostConfig}}":
+                        return CommandExecution(0, "host\n", "")
+                    if command[3].startswith('{"HostConfig":'):
                         return CommandExecution(
                             0,
-                            '{"Init":true,"PidsLimit":128,"Memory":805306368,"NanoCpus":1000000000}\n',
+                            self.runtime_config(
+                                PidsLimit=128,
+                                Memory=805306368,
+                                NanoCpus=1000000000,
+                            ),
                             "",
                         )
                 return CommandExecution(0, "", "")
@@ -400,12 +443,13 @@ class AgentConfigMountTests(unittest.TestCase):
                     if command[3] == "{{.Config.Image}}":
                         return CommandExecution(0, f"{DEFAULT_WORKER_IMAGE}\n", "")
                     if command[3] == "{{.HostConfig.NetworkMode}}":
-                        return CommandExecution(0, "bridge\n", "")
-                    if command[3] == "{{json .HostConfig}}":
+                        return CommandExecution(0, "host\n", "")
+                    if command[3].startswith('{"HostConfig":'):
                         return CommandExecution(
                             0,
-                            '{"Init":true,"PidsLimit":0,"Memory":0,"NanoCpus":0,'
-                            '"Tmpfs":{"/tmp":"rw,nosuid,nodev,size=128m"}}\n',
+                            self.runtime_config(
+                                Tmpfs={"/tmp": "rw,nosuid,nodev,size=128m"}
+                            ),
                             "",
                         )
                 return CommandExecution(0, "", "")
@@ -418,6 +462,44 @@ class AgentConfigMountTests(unittest.TestCase):
                 ["inspect", "inspect", "inspect", "inspect", "stop", "rm", "create", "start"],
             )
             self.assertNotIn("--tmpfs", calls[-2])
+
+    def test_existing_restricted_container_is_recreated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = WorkerManager(Path(temporary) / "workspaces")
+            calls: list[list[str]] = []
+
+            def executor(command: list[str]) -> CommandExecution:
+                calls.append(command)
+                if command[1] == "inspect":
+                    if command[3] == "{{.State.Running}}":
+                        return CommandExecution(0, "true\n", "")
+                    if command[3] == "{{.Config.Image}}":
+                        return CommandExecution(0, f"{DEFAULT_WORKER_IMAGE}\n", "")
+                    if command[3] == "{{.HostConfig.NetworkMode}}":
+                        return CommandExecution(0, "host\n", "")
+                    if command[3].startswith('{"HostConfig":'):
+                        return CommandExecution(
+                            0,
+                            self.runtime_config(
+                                ReadonlyRootfs=True,
+                                CapDrop=["ALL"],
+                                SecurityOpt=["no-new-privileges"],
+                            ),
+                            "",
+                        )
+                return CommandExecution(0, "", "")
+
+            status = manager.ensure_started("restricted-upgrade", executor)
+
+            self.assertEqual(status, "recreated")
+            self.assertEqual(
+                [command[1] for command in calls],
+                ["inspect", "inspect", "inspect", "inspect", "stop", "rm", "create", "start"],
+            )
+            create = calls[-2]
+            self.assertNotIn("--read-only", create)
+            self.assertNotIn("--cap-drop", create)
+            self.assertNotIn("--security-opt", create)
 
     def test_rejects_missing_or_conflicting_mount_sources_and_targets(self):
         with tempfile.TemporaryDirectory() as temporary:

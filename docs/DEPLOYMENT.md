@@ -136,7 +136,7 @@ Health   http://127.0.0.1:8000/health
 | `SLIME_WORKER_BASE_IMAGE` | `kalilinux/kali-rolling` | Worker 基础镜像 |
 | `SLIME_KALI_APT_MIRROR` | Kali 官方镜像 | Worker 软件源 |
 | `SLIME_INSTALL_NATIVE_AGENTS` | `true` | 安装 Codex、Claude、Pi CLI |
-| `SLIME_INSTALL_REFERENCE_ASSETS` | `false` | 构建时下载额外参考资产 |
+| `SLIME_INSTALL_REFERENCE_ASSETS` | `true` | 构建时下载 Cairn 的 PoC、工具和知识库 |
 
 Worker 镜像体积较大，首次构建需要较长时间和稳定网络。
 
@@ -218,7 +218,7 @@ SLIME_PORT=8000
 SLIME_WORKER_PROFILE=standard
 ```
 
-`standard` 使用 Docker `bridge` 网络且不增加 capability。只有确实需要时才选择其他 Profile；详细配置见 [CONFIGURATION.md](CONFIGURATION.md)。
+`standard` 使用 Docker `host` 网络并保留 Docker 默认 capability，与 Cairn 的 Worker 行为一致。隔离实验网络仍可通过其他 Profile 显式选择；详细配置见 [CONFIGURATION.md](CONFIGURATION.md)。
 
 ## 10. 故障排查
 
