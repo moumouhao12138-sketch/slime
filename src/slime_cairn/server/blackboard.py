@@ -1000,17 +1000,30 @@ class Blackboard:
             worker_name = worker_name.strip()
             if not cleaned_ids or not description or not worker_name:
                 raise ValueError("完成记录需要 fact_ids、description 和 worker_name")
+            submission_scope = project.scope.get("submission")
+            agent_match_scope = project.scope.get("agent_match")
             benchmark_scope = project.scope.get("benchmark")
-            if isinstance(benchmark_scope, dict) and benchmark_scope.get("managed") is True:
+            required_verification_predicate = ""
+            if (
+                isinstance(submission_scope, dict)
+                and submission_scope.get("managed") is True
+                and submission_scope.get("platform") == "agent_match"
+                and isinstance(agent_match_scope, dict)
+                and agent_match_scope.get("managed") is True
+            ):
+                required_verification_predicate = "agent_match_completion_verified"
+            elif isinstance(benchmark_scope, dict) and benchmark_scope.get("managed") is True:
+                required_verification_predicate = "benchmark_completion_verified"
+            if required_verification_predicate:
                 placeholders = ",".join("?" for _ in cleaned_ids)
                 verified = self._connection.execute(
                     f"""SELECT id FROM facts WHERE project_id = ?
-                    AND predicate = 'benchmark_completion_verified'
+                    AND predicate = ?
                     AND id IN ({placeholders}) LIMIT 1""",
-                    (project_id, *cleaned_ids),
+                    (project_id, required_verification_predicate, *cleaned_ids),
                 ).fetchone()
                 if verified is None:
-                    raise ValueError("Benchmark 项目需要平台完成验证 Fact")
+                    raise ValueError("托管平台项目需要平台完成验证 Fact")
             placeholders = ",".join("?" for _ in cleaned_ids)
             rows = self._connection.execute(
                 f"SELECT id FROM facts WHERE project_id = ? AND id IN ({placeholders})",

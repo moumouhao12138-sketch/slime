@@ -159,6 +159,7 @@ src/slime_cairn/
 - [部署文档](docs/DEPLOYMENT.md)
 - [使用文档](docs/USER_GUIDE.md)
 - [配置参考](docs/CONFIGURATION.md)
+- [比赛接入说明](docs/COMPETITION.md)
 - [架构说明](docs/ARCHITECTURE.md)
 
 ## 本地开发

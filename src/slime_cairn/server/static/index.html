@@ -668,12 +668,14 @@
         selectedProjectIds: new Set(),
         bulkDeleteProjectIds: [],
         creatingProject: false,
+        benchmarkMode: "benchmark",
         benchmarkStatus: null,
         benchmarkChallenges: [],
         benchmarkLoading: false,
         benchmarkPollTimer: null,
         benchmarkRenderKey: "",
         benchmarkError: "",
+        benchmarkActionError: "",
       };
 
       const byId = (id) => document.getElementById(id);
@@ -1934,15 +1936,19 @@
       }
 
       function benchmarkStatusClass(challenge) {
-        if (challenge.is_completed) return "completed";
-        if (challenge.container_status === "available") return "running";
-        if (challenge.container_status === "pending" || challenge.container_status === "stop_pending") return "pending";
+        const solved = Boolean(challenge.is_completed || challenge.hasSolved);
+        if (solved) return "completed";
+        if (challenge.project_status === "running" || challenge.container_status === "available") return "running";
+        if (challenge.project_status === "starting" || challenge.container_status === "pending" || challenge.container_status === "stop_pending") return "pending";
+        if (challenge.endpoints?.length) return "running";
+        if (challenge.project_status === "completed") return "completed";
         return "stopped";
       }
 
       function benchmarkPresentationKey(settings, challenges) {
         const automation = settings?.automation || {};
         return JSON.stringify({
+          mode: state.benchmarkMode,
           configured: Boolean(settings?.configured),
           base_url: settings?.base_url || "",
           task_key: settings?.task_key || "",
@@ -1957,7 +1963,9 @@
             last_error: automation.last_error || "",
           },
           challenges: (challenges || []).map((challenge) => ({
-            unique_code: challenge.unique_code || "",
+            unique_code: challenge.unique_code || challenge.id || "",
+            name: challenge.name || "",
+            category_name: challenge.category_name || "",
             description: challenge.description || "",
             difficulty: challenge.difficulty || "",
             level: challenge.level ?? null,
@@ -1967,6 +1975,9 @@
             container_status: challenge.container_status || "stopped",
             container_addr: Array.isArray(challenge.container_addr) ? challenge.container_addr : [],
             project_id: challenge.project_id || "",
+            project_status: challenge.project_status || "",
+            hasSolved: Boolean(challenge.hasSolved),
+            endpoints: Array.isArray(challenge.endpoints) ? challenge.endpoints : [],
             is_completed: Boolean(challenge.is_completed),
           })),
         });
@@ -2022,26 +2033,33 @@
         const uiState = captureBenchmarkUiState(list);
         list.replaceChildren();
         const settings = state.benchmarkStatus || {};
+        const agentMode = state.benchmarkMode === "agent-match";
         const automation = settings.automation || {};
         const automationLine = byId("benchmark-automation-line");
         const automationRunning = Boolean(automation.enabled);
-        byId("benchmark-automation-start").classList.toggle("hidden", automationRunning);
-        byId("benchmark-automation-stop").classList.toggle("hidden", !automationRunning);
+        byId("benchmark-automation-start").classList.toggle("hidden", agentMode || automationRunning);
+        byId("benchmark-automation-stop").classList.toggle("hidden", agentMode || !automationRunning);
         byId("benchmark-automation-start").disabled = state.benchmarkLoading || !settings.configured;
         byId("benchmark-automation-stop").disabled = state.benchmarkLoading;
         automationLine.classList.toggle("error", Boolean(state.benchmarkError) || ["error", "degraded"].includes(automation.status));
-        if (automation.status === "completed") {
+        if (agentMode) {
+          automationLine.textContent = "赛事平台已连接 · 可启动题目环境";
+        } else if (automation.status === "completed") {
           automationLine.textContent = `全部完成 · ${automation.completed_count || 0}/${automation.total_count || 0}`;
         } else if (automationRunning) {
           automationLine.textContent = `自动运行 · 实例 ${automation.active_count || 0}/${automation.parallelism || 3} · 完成 ${automation.completed_count || 0}/${automation.total_count || 0} · 排队 ${automation.queued_count || 0}${automation.last_error ? ` · ${automation.last_error}` : ""}`;
         } else {
           automationLine.textContent = automation.last_error ? `自动化已停止 · ${automation.last_error}` : "自动化未启动";
         }
-        byId("benchmark-status-line").textContent = state.benchmarkError
-          ? `更新失败，保留上次数据 · ${state.benchmarkError}`
+        byId("benchmark-status-line").textContent = state.benchmarkActionError
+          ? `操作失败 · ${state.benchmarkActionError}`
+          : state.benchmarkError
+            ? `更新失败，保留上次数据 · ${state.benchmarkError}`
           : settings.configured
-            ? `已连接 ${settings.base_url} · Task ${settings.task_key}`
-            : "尚未配置 BENCHMARK_BASE_URL / BENCHMARK_TOKEN";
+            ? (agentMode
+              ? `已连接赛事平台 ${settings.base_url}`
+              : `已连接 ${settings.base_url} · Task ${settings.task_key}`)
+            : "尚未配置赛事平台或评测平台";
         if (state.benchmarkLoading && state.benchmarkStatus === null) {
           list.append(element("div", "benchmark-empty", "正在读取题目与平台进度…"));
           return;
@@ -2051,8 +2069,8 @@
             "div",
             "notice",
             state.benchmarkError
-              ? "评测平台暂时读取失败，稍后会自动重试。"
-              : "请在项目 .env 中填写评测平台下发的 BENCHMARK_BASE_URL 和 BENCHMARK_TOKEN，然后重启服务。",
+              ? "平台暂时读取失败，稍后会自动重试。"
+              : "请在项目 .env 中填写赛事平台的 AGENT_MATCH_BASE_URL 和 AGENT_MATCH_ACCESS_KEY，然后重启服务。",
           ));
           return;
         }
@@ -2061,13 +2079,16 @@
           return;
         }
         state.benchmarkChallenges.forEach((challenge) => {
+          const challengeKey = challenge.unique_code || challenge.id;
+          const solved = Boolean(challenge.is_completed || challenge.hasSolved);
+          const projectId = challenge.project_id || "";
           const card = element("article", "benchmark-card");
-          card.dataset.challengeCode = challenge.unique_code || "";
+          card.dataset.challengeCode = challengeKey || "";
           const header = element("div", "benchmark-card-header");
           const copy = element("div");
           copy.append(
-            element("h3", "benchmark-code", challenge.unique_code || "未命名题目"),
-            element("p", "benchmark-description", challenge.description || "平台未提供题目描述"),
+            element("h3", "benchmark-code", challenge.name || challenge.unique_code || `题目 ${challenge.id || ""}` || "未命名题目"),
+            element("p", "benchmark-description", challenge.description || (challenge.category_name ? `分类：${challenge.category_name}` : "平台未提供题目描述")),
           );
           const chip = element("span");
           setStatusChip(chip, benchmarkStatusClass(challenge));
@@ -2075,11 +2096,11 @@
 
           const meta = element("div", "benchmark-meta");
           const metaValues = [
-            ["难度", challenge.difficulty || "-"],
+            ["分类", challenge.category_name || "-"],
+            ["难度", challenge.difficulty || challenge.level || "-"],
             ["关卡", challenge.level ?? "-"],
-            ["分值", challenge.total_score ?? "-"],
-            ["Flag", `${challenge.correct_flag_count || 0}/${challenge.flag_count || 0}`],
-            ["实例", challenge.container_status || "stopped"],
+            ["分值", challenge.total_score ?? challenge.score ?? "-"],
+            ["状态", challenge.project_status || (solved ? "已解决" : challenge.container_status || "未启动")],
           ];
           metaValues.forEach(([label, value]) => {
             const item = element("span");
@@ -2087,46 +2108,56 @@
             meta.append(item);
           });
           card.append(header, meta);
-          if ((challenge.container_addr || []).length) {
-            card.append(element("div", "benchmark-address", challenge.container_addr.join(" · ")));
+          const addresses = Array.isArray(challenge.container_addr) ? challenge.container_addr : [];
+          if (!addresses.length && Array.isArray(challenge.endpoints)) {
+            challenge.endpoints.forEach((endpoint) => {
+              const proxies = Array.isArray(endpoint.proxyIps) ? endpoint.proxyIps : [];
+              const mappings = Array.isArray(endpoint.portMappings) ? endpoint.portMappings : [];
+              proxies.forEach((host) => mappings.forEach((mapping) => addresses.push(`${host}:${mapping.proxy || mapping.port || ""}`)));
+            });
+          }
+          if (addresses.length) {
+            card.append(element("div", "benchmark-address", addresses.join(" · ")));
           }
 
           const actions = element("div", "benchmark-actions");
-          const start = element("button", "button primary", challenge.project_id ? "重启 / 同步实例" : "启动并创建项目");
+          const start = element("button", "button primary", projectId ? "重启 / 同步实例" : "启动并创建项目");
           start.type = "button";
-          start.disabled = challenge.is_completed;
-          start.addEventListener("click", () => benchmarkStart(challenge.unique_code, start));
+          start.disabled = solved;
+          start.addEventListener("click", () => benchmarkStart(challengeKey, start));
           actions.append(start);
-          if (challenge.project_id) {
+          if (projectId) {
             const open = element("button", "button", "打开项目");
             open.type = "button";
             open.addEventListener("click", async () => {
               closeBenchmarkDialog();
-              await selectProject(challenge.project_id);
+              await selectProject(projectId);
             });
             actions.append(open);
           }
-          const hint = element("button", "button warning", "获取 Hint（扣分）");
-          hint.type = "button";
-          hint.disabled = challenge.is_completed;
-          hint.addEventListener("click", () => benchmarkHint(challenge.unique_code, hint));
-          actions.append(hint);
-          if (["available", "pending", "stop_pending"].includes(challenge.container_status)) {
+          if (!agentMode) {
+            const hint = element("button", "button warning", "获取 Hint（扣分）");
+            hint.type = "button";
+            hint.disabled = solved;
+            hint.addEventListener("click", () => benchmarkHint(challengeKey, hint));
+            actions.append(hint);
+          }
+          if (agentMode ? (projectId && !solved) : ["available", "pending", "stop_pending"].includes(challenge.container_status)) {
             const close = element("button", "button critical", "关闭实例");
             close.type = "button";
-            close.addEventListener("click", () => benchmarkClose(challenge.unique_code, close));
+            close.addEventListener("click", () => benchmarkClose(challengeKey, close));
             actions.append(close);
           }
-          if (challenge.project_id && !challenge.is_completed) {
+          if (projectId && !solved) {
             const form = element("div", "benchmark-submit");
             const input = element("input", "dialog-input");
             input.type = "text";
-            input.placeholder = "手动提交候选 Flag（AI 也会自动提交）";
-            input.setAttribute("aria-label", `${challenge.unique_code} 候选 Flag`);
-            input.dataset.benchmarkCode = challenge.unique_code || "";
+            input.placeholder = agentMode ? "手动提交候选 Flag" : "手动提交候选 Flag（AI 也会自动提交）";
+            input.setAttribute("aria-label", `${challengeKey} 候选 Flag`);
+            input.dataset.benchmarkCode = challengeKey || "";
             const submit = element("button", "button primary", "提交");
             submit.type = "button";
-            const run = () => benchmarkSubmit(challenge.unique_code, input, submit);
+            const run = () => benchmarkSubmit(challengeKey, input, submit);
             submit.addEventListener("click", run);
             input.addEventListener("keydown", (event) => { if (event.key === "Enter") run(); });
             form.append(input, submit);
@@ -2146,12 +2177,28 @@
         if (firstLoad && options.showLoading) renderBenchmarkChallenges();
         let shouldRender = firstLoad || forceRender;
         try {
-          const nextStatus = await request("/benchmark/status");
-          const nextChallenges = nextStatus.configured
-            ? ((await request("/benchmark/challenges")).challenges || [])
-            : [];
+          let nextStatus;
+          let nextChallenges;
+          let nextMode;
+          try {
+            const agentStatus = await request("/agent-match/status");
+            if (agentStatus.configured) {
+              nextMode = "agent-match";
+              nextStatus = agentStatus;
+              nextChallenges = (await request("/agent-match/exercises")).exercises || [];
+            } else {
+              throw new Error("agent_match_not_configured");
+            }
+          } catch (agentError) {
+            nextMode = "benchmark";
+            nextStatus = await request("/benchmark/status");
+            nextChallenges = nextStatus.configured
+              ? ((await request("/benchmark/challenges")).challenges || [])
+              : [];
+          }
           const nextKey = benchmarkPresentationKey(nextStatus, nextChallenges);
           shouldRender = shouldRender || nextKey !== state.benchmarkRenderKey || Boolean(state.benchmarkError);
+          state.benchmarkMode = nextMode;
           state.benchmarkStatus = nextStatus;
           state.benchmarkChallenges = nextChallenges;
           state.benchmarkRenderKey = nextKey;
@@ -2217,17 +2264,36 @@
       }
 
       async function benchmarkStart(uniqueCode, button) {
+        const originalLabel = button.textContent;
         button.disabled = true;
+        button.textContent = "正在启动…";
+        state.benchmarkActionError = "";
+        showToast(`题目 ${uniqueCode} 正在启动，等待平台返回环境…`);
         try {
-          const result = await request(`/benchmark/challenges/${encodeURIComponent(uniqueCode)}/start`, { method: "POST" });
+          const path = state.benchmarkMode === "agent-match"
+            ? `/agent-match/exercises/${encodeURIComponent(uniqueCode)}/start`
+            : `/benchmark/challenges/${encodeURIComponent(uniqueCode)}/start`;
+          const result = await request(path, { method: "POST" });
           state.selectedProjectId = result.project?.id || state.selectedProjectId;
           showToast(`题目 ${uniqueCode} 已启动，Reason 将生成并行探索分支`);
+          state.benchmarkActionError = "";
           await loadBenchmarkChallenges();
           await refresh(true);
         } catch (error) {
-          showToast(`启动题目失败: ${error.message}`, true);
+          const raw = String(error.message || error);
+          const message = raw.includes("429") || /rate.?limit|too many/i.test(raw)
+            ? "平台正在限流或已有启动请求，请等待当前环境状态刷新后再操作。"
+            : raw.includes("504") || /timeout|timed out|did not become ready/i.test(raw)
+              ? "平台在等待时间内没有返回可用环境；附件题无需靶机时可直接继续，网络题请稍后重试。"
+              : raw;
+          state.benchmarkActionError = message;
+          showToast(`启动题目失败: ${message}`, true);
+          await loadBenchmarkChallenges({ force: true });
         } finally {
-          if (button.isConnected) button.disabled = false;
+          if (button.isConnected) {
+            button.disabled = false;
+            button.textContent = originalLabel;
+          }
         }
       }
 
@@ -2252,8 +2318,12 @@
         const flag = input.value.trim();
         if (!flag) return;
         button.disabled = true;
+        state.benchmarkActionError = "";
         try {
-          const result = await request(`/benchmark/challenges/${encodeURIComponent(uniqueCode)}/submit`, {
+          const path = state.benchmarkMode === "agent-match"
+            ? `/agent-match/exercises/${encodeURIComponent(uniqueCode)}/submit`
+            : `/benchmark/challenges/${encodeURIComponent(uniqueCode)}/submit`;
+          const result = await request(path, {
             method: "POST",
             body: JSON.stringify({ flag }),
           });
@@ -2263,6 +2333,7 @@
           await loadBenchmarkChallenges();
           await refresh(true);
         } catch (error) {
+          state.benchmarkActionError = String(error.message || error);
           showToast(`提交失败: ${error.message}`, true);
         } finally {
           if (button.isConnected) button.disabled = false;
@@ -2271,12 +2342,17 @@
 
       async function benchmarkClose(uniqueCode, button) {
         button.disabled = true;
+        state.benchmarkActionError = "";
         try {
-          await request(`/benchmark/challenges/${encodeURIComponent(uniqueCode)}/close`, { method: "POST" });
+          const path = state.benchmarkMode === "agent-match"
+            ? `/agent-match/exercises/${encodeURIComponent(uniqueCode)}/recover`
+            : `/benchmark/challenges/${encodeURIComponent(uniqueCode)}/close`;
+          await request(path, { method: "POST" });
           showToast(`题目 ${uniqueCode} 实例已关闭`);
           await loadBenchmarkChallenges();
           await refresh(true);
         } catch (error) {
+          state.benchmarkActionError = String(error.message || error);
           showToast(`关闭实例失败: ${error.message}`, true);
         } finally {
           if (button.isConnected) button.disabled = false;

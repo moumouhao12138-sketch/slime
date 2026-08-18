@@ -16,6 +16,8 @@ from ..domain.models import FactCandidate, HypothesisCandidate, IntentProposal
 from ..domain.nutrients import NutrientEngine
 from ..domain.seeding import seed_project_context_facts
 from ..domain.validation import FactEvidenceGate, HypothesisGate, IntentGate
+from ..integrations.agent_match.client import AgentMatchClient, AgentMatchError, AgentMatchSettings
+from ..integrations.agent_match.runtime import AgentMatchProjectController
 from ..integrations.benchmark.client import BenchmarkClient, BenchmarkError, BenchmarkSettings
 from ..integrations.benchmark.runtime import BenchmarkProjectController
 from .blackboard import Blackboard
@@ -116,6 +118,10 @@ class BenchmarkAutomationInput(BaseModel):
     parallelism: int = Field(default=3, ge=1, le=3)
 
 
+class AgentMatchSubmitInput(BaseModel):
+    flag: str = Field(min_length=1, max_length=256)
+
+
 @app.get("/health")
 def health() -> dict:
     return {"ok": True, "version": __version__}
@@ -149,6 +155,32 @@ def _benchmark_controller() -> tuple[BenchmarkProjectController, BenchmarkClient
 
 
 def _raise_benchmark_error(exc: BenchmarkError) -> None:
+    raise HTTPException(exc.status_code, exc.as_dict()) from exc
+
+
+def _agent_match_settings() -> AgentMatchSettings:
+    try:
+        return AgentMatchSettings.from_env()
+    except ValueError as exc:
+        raise HTTPException(503, {"code": "agent_match_config_error", "message": str(exc), "detail": {}}) from exc
+
+
+def _agent_match_controller() -> tuple[AgentMatchProjectController, AgentMatchClient]:
+    settings = _agent_match_settings()
+    if not settings.configured:
+        raise HTTPException(
+            503,
+            {
+                "code": "agent_match_not_configured",
+                "message": "AGENT_MATCH_BASE_URL and AGENT_MATCH_ACCESS_KEY are required",
+                "detail": {},
+            },
+        )
+    client = AgentMatchClient(settings)
+    return AgentMatchProjectController(board, client, settings), client
+
+
+def _raise_agent_match_error(exc: AgentMatchError) -> None:
     raise HTTPException(exc.status_code, exc.as_dict()) from exc
 
 
@@ -275,6 +307,128 @@ def benchmark_close(unique_code: str) -> dict:
         return controller.close(unique_code)
     except BenchmarkError as exc:
         _raise_benchmark_error(exc)
+    finally:
+        client.close_client()
+
+
+@app.get("/agent-match/status")
+def agent_match_status() -> dict:
+    return _agent_match_settings().public_status()
+
+
+@app.get("/agent-match/match-info")
+def agent_match_info() -> dict:
+    controller, client = _agent_match_controller()
+    del controller
+    try:
+        return client.match_info()
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
+    finally:
+        client.close_client()
+
+
+@app.get("/agent-match/overview")
+def agent_match_overview() -> dict:
+    controller, client = _agent_match_controller()
+    del controller
+    try:
+        return client.overview()
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
+    finally:
+        client.close_client()
+
+
+@app.get("/agent-match/notices")
+def agent_match_notices() -> dict:
+    controller, client = _agent_match_controller()
+    del controller
+    try:
+        return {"notices": client.list_notices()}
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
+    finally:
+        client.close_client()
+
+
+@app.get("/agent-match/notices/{notice_id}")
+def agent_match_notice_detail(notice_id: int) -> dict:
+    controller, client = _agent_match_controller()
+    del controller
+    try:
+        return client.notice_detail(notice_id)
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
+    finally:
+        client.close_client()
+
+
+@app.get("/agent-match/exercises")
+def agent_match_exercises() -> dict:
+    controller, client = _agent_match_controller()
+    try:
+        return {"exercises": controller.list_exercises()}
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
+    finally:
+        client.close_client()
+
+
+@app.get("/agent-match/exercises/{exercise_id}")
+def agent_match_exercise(exercise_id: int) -> dict:
+    controller, client = _agent_match_controller()
+    try:
+        return controller.exercise(exercise_id)
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
+    finally:
+        client.close_client()
+
+
+@app.post("/agent-match/exercises/{exercise_id}/start")
+def agent_match_start(exercise_id: int) -> dict:
+    controller, client = _agent_match_controller()
+    try:
+        return controller.start(exercise_id)
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
+    finally:
+        client.close_client()
+
+
+@app.post("/agent-match/exercises/{exercise_id}/submit")
+def agent_match_submit(exercise_id: int, payload: AgentMatchSubmitInput) -> dict:
+    controller, client = _agent_match_controller()
+    try:
+        project = controller.find_project(exercise_id)
+        if project is None:
+            raise AgentMatchError(
+                409,
+                "exercise_not_started",
+                "Start the exercise before submitting a candidate answer",
+            )
+        return controller.submit_candidates(
+            project.id,
+            [payload.flag],
+            worker_name="agent-match-ui",
+            completion_description="Manual candidate accepted and competition platform verified completion",
+        )
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    finally:
+        client.close_client()
+
+
+@app.post("/agent-match/exercises/{exercise_id}/recover")
+def agent_match_recover(exercise_id: int) -> dict:
+    controller, client = _agent_match_controller()
+    try:
+        return controller.recover(exercise_id)
+    except AgentMatchError as exc:
+        _raise_agent_match_error(exc)
     finally:
         client.close_client()
 

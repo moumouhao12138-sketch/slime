@@ -39,7 +39,6 @@ RUN groupadd --gid 1000 kali \
     && printf 'kali ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/kali \
     && chmod 0440 /etc/sudoers.d/kali
 
-COPY scripts/build_tool_manifest.py /usr/local/bin/build_tool_manifest.py
 COPY scripts/fetch_reference_asset.sh /usr/local/bin/fetch_reference_asset
 
 RUN chmod +x /usr/local/bin/fetch_reference_asset \
@@ -84,7 +83,11 @@ RUN if [ "${INSTALL_REFERENCE_ASSETS}" = "true" ]; then \
         git clone --depth 1 https://github.com/vulhub/vulhub.git /home/kali/pocs/vulhub; \
     fi
 
-RUN mkdir -p /home/kali/.config/nuclei /workspace /opt/slime-cairn \
+COPY scripts/build_tool_manifest.py /usr/local/bin/build_tool_manifest.py
+
+RUN install -d -o 1000 -g 1000 \
+        /home/kali/.config/nuclei /home/kali/.cache /home/kali/.cache/ms-playwright /workspace \
+    && mkdir -p /opt/slime-cairn \
     && printf 'disable-update-check: true\nupdate-template-dir: /home/kali/.local/nuclei-templates\n' > /home/kali/.config/nuclei/config.yaml \
     && ln -s /home/kali/pocs /opt/slime-cairn/pocs \
     && ln -s /home/kali/tools /opt/slime-cairn/tools \
@@ -93,10 +96,12 @@ RUN mkdir -p /home/kali/.config/nuclei /workspace /opt/slime-cairn \
     && printf '%s\n' 'PS1="${PS1%\\n*} \[\033[0;36m\]\D{%y-%m-%d} - \t\[\033[;32m\]\n${PS1##*\\n}"' >> /home/kali/.bashrc \
     && rm -rf /usr/lib/llvm-*/build \
     && chmod o+rx /usr/lib/mysql/plugin/auth_pam_tool_dir /etc/ssl/private \
-    && chown -R 1000:1000 /home/kali/.config /workspace \
-    && python3 /usr/local/bin/build_tool_manifest.py /opt/slime-cairn/tools.json \
-    && chmod a+r /opt/slime-cairn/tools.json \
-    && install -d -o 1000 -g 1000 /home/kali/.cache /home/kali/.cache/ms-playwright \
+    && chown -R 1000:1000 /home/kali/.config /home/kali/.cache /workspace \
+    && runuser -u kali -- env HOME=/home/kali \
+        python3 /usr/local/bin/build_tool_manifest.py /tmp/slime-tools.json \
+    && install -m 0644 /tmp/slime-tools.json /opt/slime-cairn/tools.json \
+    && rm /tmp/slime-tools.json \
+    && test ! -e /home/kali/.codex \
     && (setcap -r /usr/lib/nmap/nmap || true)
 
 USER kali
@@ -113,7 +118,8 @@ RUN ffmpeg_path="$(find /home/kali/.cache/ms-playwright -type f -name ffmpeg-lin
         '[.[] | select(.name != "ffmpeg")] + [{"name":"ffmpeg","path":$path,"version":$version,"category":"media","interactive":false,"required_capabilities":[],"available":true}]' \
         /opt/slime-cairn/tools.json > /tmp/slime-tools.json \
     && install -m 0644 /tmp/slime-tools.json /opt/slime-cairn/tools.json \
-    && rm /tmp/slime-tools.json
+    && rm /tmp/slime-tools.json \
+    && test ! -e /home/kali/.codex
 
 USER kali
 WORKDIR /workspace

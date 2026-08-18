@@ -1,0 +1,23 @@
+ARG BASE_IMAGE=ghcr.1ms.run/moumouhao12138-sketch/slime-worker:0.0.37-fixed-before-cairn-assets
+FROM ${BASE_IMAGE}
+
+USER root
+COPY --chown=1000:1000 check-hacktricks-cloud.tgz /tmp/hacktricks-cloud.tgz
+COPY --chown=1000:1000 check-Awesome-POC.tgz /tmp/Awesome-POC.tgz
+RUN rm -rf /home/kali/knowledges/hacktricks-cloud /home/kali/pocs/Awesome-POC \
+    && install -d -o 1000 -g 1000 \
+        /home/kali/knowledges/hacktricks-cloud /home/kali/pocs/Awesome-POC \
+    && tar -xzf /tmp/hacktricks-cloud.tgz --strip-components=1 \
+        -C /home/kali/knowledges/hacktricks-cloud \
+    && tar -xzf /tmp/Awesome-POC.tgz --strip-components=1 \
+        -C /home/kali/pocs/Awesome-POC \
+    && chown -R 1000:1000 \
+        /home/kali/knowledges/hacktricks-cloud /home/kali/pocs/Awesome-POC \
+    && rm /tmp/hacktricks-cloud.tgz /tmp/Awesome-POC.tgz \
+    && test -f /home/kali/knowledges/hacktricks-cloud/README.md \
+    && test -f /home/kali/pocs/Awesome-POC/README.md
+
+USER kali
+WORKDIR /workspace
+ENTRYPOINT []
+CMD ["sleep", "infinity"]

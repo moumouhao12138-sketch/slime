@@ -7,7 +7,6 @@ from ..domain.models import Fact, IntentProposal, new_id, now
 from ..domain.nutrients import NutrientEngine
 from ..domain.validation import FactEvidenceGate, HypothesisGate, IntentGate
 from ..domain.workspace import IsolatedWorkspace
-from ..protocol.contracts import extract_submission_candidates
 from ..server.blackboard import Blackboard
 from dataclasses import asdict
 from hashlib import sha256
@@ -17,6 +16,8 @@ from typing import Any, TYPE_CHECKING
 import yaml
 
 if TYPE_CHECKING:
+    from ..integrations.agent_match.client import AgentMatchClient
+    from ..integrations.agent_match.runtime import AgentMatchProjectController
     from ..integrations.benchmark.client import BenchmarkClient
     from ..integrations.benchmark.runtime import BenchmarkProjectController
 
@@ -32,6 +33,7 @@ class Scheduler:
         no_progress_audit_threshold: int = 2,
         workspace: IsolatedWorkspace | None = None,
         benchmark_client: "BenchmarkClient | None" = None,
+        agent_match_client: "AgentMatchClient | None" = None,
     ) -> None:
         self.board = board
         self.project_id = project_id
@@ -49,11 +51,26 @@ class Scheduler:
         self.last_reason_rejections: list[str] = []
         self.last_reason_completion: dict | None = None
         self.benchmark_client = benchmark_client
+        self.agent_match_client = agent_match_client
 
-    def _benchmark_controller(self) -> "BenchmarkProjectController":
-        # Benchmark is an optional control-plane extension. Keep its HTTP
-        # client out of the Cairn core import path and load it only when a
-        # project explicitly carries benchmark metadata.
+    def _submission_controller(self, project: Any) -> "BenchmarkProjectController | AgentMatchProjectController":
+        """Resolve the optional control-plane adapter for one managed project."""
+
+        metadata = self._managed_submission_metadata(project)
+        if metadata and metadata.get("platform") == "agent_match":
+            from ..integrations.agent_match.client import AgentMatchClient, AgentMatchSettings
+            from ..integrations.agent_match.runtime import AgentMatchProjectController
+
+            if self.agent_match_client is None:
+                settings = AgentMatchSettings.from_env()
+                self.agent_match_client = AgentMatchClient(settings)
+            return AgentMatchProjectController(
+                self.board,
+                self.agent_match_client,
+                self.agent_match_client.settings,
+            )
+
+        # Benchmark remains a supported legacy managed-submission adapter.
         from ..integrations.benchmark.client import BenchmarkClient, BenchmarkSettings
         from ..integrations.benchmark.runtime import BenchmarkProjectController
 
@@ -67,15 +84,14 @@ class Scheduler:
         )
 
     @staticmethod
-    def _benchmark_metadata(project: Any) -> dict[str, Any] | None:
+    def _managed_submission_metadata(project: Any) -> dict[str, Any] | None:
+        submission = project.scope.get("submission")
+        if isinstance(submission, dict) and submission.get("managed") is True:
+            return dict(submission)
         value = project.scope.get("benchmark")
         if isinstance(value, dict) and value.get("managed") is True:
-            return dict(value)
+            return {"platform": "benchmark", **value}
         return None
-
-    @staticmethod
-    def _extract_submission_candidates(value: object) -> list[str]:
-        return extract_submission_candidates(value)
 
     def _discard_report_if_project_not_running(
         self,
@@ -524,8 +540,8 @@ class Scheduler:
         benchmark_submission: dict[str, Any] | None = None
         self.last_reason_rejections = []
         if report.completion is not None:
-            if self._benchmark_metadata(project):
-                benchmark_submission = self._benchmark_controller().submit_candidates(
+            if self._managed_submission_metadata(project):
+                benchmark_submission = self._submission_controller(project).submit_candidates(
                     self.project_id,
                     report.completion.submissions,
                     worker_name=worker_name,
@@ -539,10 +555,10 @@ class Scheduler:
                     follow_up = IntentProposal(
                         kind="explore",
                         objective=(
-                            "The Benchmark platform has not verified every required flag "
+                            "The managed platform has not verified the required answer "
                             f"({int(progress.get('correct_flag_count') or 0)}/"
                             f"{int(progress.get('flag_count') or 0)}). Continue autonomous analysis, "
-                            "use the verified/rejected submission Facts, find remaining exact flag values, "
+                            "use the verified/rejected submission Facts, find a new exact answer value, "
                             "and avoid repeating prior candidates."
                         ),
                         target_entity=project.target,
@@ -553,7 +569,7 @@ class Scheduler:
                         novelty=0.8,
                         cost=0.3,
                         risk=0.0,
-                        context={"benchmark_follow_up": True, "progress": progress},
+                        context={"benchmark_follow_up": True, "submission_follow_up": True, "progress": progress},
                     )
                     review = IntentGate(self.board, project).review(follow_up)
                     if review.accepted:
@@ -810,45 +826,48 @@ class Scheduler:
         direct_completion = None
         completion_rejection = ""
         benchmark_submission: dict[str, Any] | None = None
-        if self._benchmark_metadata(project):
+        submission_metadata = self._managed_submission_metadata(project)
+        if submission_metadata:
             explicit_candidates: list[str] = []
-            automatic_candidates: list[str] = []
             candidate_fact_ids: list[str] = []
             for candidate_index, candidate in enumerate(report.candidate_facts):
                 fact = accepted_by_candidate_index.get(candidate_index)
                 if fact is None:
                     continue
-                automatic_candidates.extend(self._extract_submission_candidates(candidate.object))
-                raw_candidates = candidate.attributes.get("benchmark_submissions")
+                raw_candidates = candidate.attributes.get("submission_candidates")
+                # Keep the pre-managed-platform field readable for legacy
+                # Benchmark projects only. Agent Match must use the explicit,
+                # format-neutral submission_candidates contract.
+                if (
+                    not isinstance(raw_candidates, list)
+                    and submission_metadata.get("platform") == "benchmark"
+                ):
+                    raw_candidates = candidate.attributes.get("benchmark_submissions")
                 if not isinstance(raw_candidates, list):
                     raw_candidates = []
-                explicit_candidates.extend(
+                normalized_candidates = [
                     str(value).strip()
                     for value in raw_candidates
                     if isinstance(value, str) and value.strip()
-                )
-                candidate_fact_ids.append(fact.id)
-            submission_candidates = list(
-                dict.fromkeys([*explicit_candidates, *automatic_candidates])
-            )
+                ]
+                if normalized_candidates:
+                    explicit_candidates.extend(normalized_candidates)
+                    candidate_fact_ids.append(fact.id)
+            submission_candidates = list(dict.fromkeys(explicit_candidates))
             if submission_candidates:
                 try:
-                    benchmark_submission = self._benchmark_controller().submit_candidates(
+                    benchmark_submission = self._submission_controller(project).submit_candidates(
                         self.project_id,
                         submission_candidates,
                         worker_name=worker_name,
                         completion_fact_ids=candidate_fact_ids,
-                        completion_description=(
-                            "Worker Fact automatically yielded Benchmark candidates"
-                            if automatic_candidates
-                            else "Explore explicitly reported Benchmark candidates"
-                        ),
+                        completion_description="Explore explicitly reported managed-platform candidates",
                     )
                 except (ValueError, RuntimeError) as exc:
                     # Facts are already durable. Raising keeps the Intent
                     # retryable while avoiding a silent candidate drop.
                     raise RuntimeError(
-                        f"Benchmark candidate submission failed: {exc}"
+                        f"Managed platform candidate submission failed: {exc}"
                     ) from exc
         if report.completion is not None:
             if mode != "bootstrap":

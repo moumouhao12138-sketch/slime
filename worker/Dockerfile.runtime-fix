@@ -1,0 +1,15 @@
+ARG BASE_IMAGE=ghcr.1ms.run/moumouhao12138-sketch/slime-worker:0.0.37
+FROM ${BASE_IMAGE}
+
+USER root
+COPY scripts/build_tool_manifest.py /usr/local/bin/build_tool_manifest.py
+# The old image only polluted this build-time Codex cache.  Removing it lets
+# the runtime kali user perform the first initialization, as in Cairn.
+RUN rm -rf /home/kali/.codex \
+    && test ! -e /home/kali/.codex \
+    && test -w /home/kali
+
+USER kali
+WORKDIR /workspace
+ENTRYPOINT []
+CMD ["sleep", "infinity"]

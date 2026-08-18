@@ -1,10 +1,12 @@
 ﻿from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 DEFINITIONS = [
@@ -58,14 +60,34 @@ DEFINITIONS = [
 
 
 def version_of(path: str) -> str:
-    for args in ([path, "--version"], [path, "-V"]):
-        try:
-            result = subprocess.run(args, capture_output=True, text=True, timeout=5, check=False)
-            line = (result.stdout or result.stderr).splitlines()
-            if line:
-                return line[0][:200]
-        except Exception:
-            pass
+    # Several Agent CLIs create caches, state databases, and PATH aliases even
+    # for a version query.  A build-time inventory must not seed the runtime
+    # user's HOME with files owned by the image builder (normally root).
+    with tempfile.TemporaryDirectory(prefix="slime-tool-probe-") as probe_home:
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "HOME": probe_home,
+                "CODEX_HOME": str(Path(probe_home) / ".codex"),
+                "CLAUDE_CONFIG_DIR": str(Path(probe_home) / ".claude"),
+                "PI_CODING_AGENT_DIR": str(Path(probe_home) / ".pi"),
+            }
+        )
+        for args in ([path, "--version"], [path, "-V"]):
+            try:
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                    env=environment,
+                )
+                line = (result.stdout or result.stderr).splitlines()
+                if line:
+                    return line[0][:200]
+            except Exception:
+                pass
     return "unknown"
 
 

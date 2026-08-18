@@ -41,7 +41,7 @@
     },
     "reason": {
       "timeout": 300,
-      "max_intents": 8
+      "max_intents": 2
     },
     "explore": {
       "timeout": 300,
@@ -71,7 +71,7 @@
     {
       "name": "pi-native",
       "type": "pi",
-      "enabled": true,
+      "enabled": false,
       "execution": "native-agent",
       "task_types": ["bootstrap", "explore", "reason"],
       "max_running": 4,

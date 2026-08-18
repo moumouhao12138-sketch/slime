@@ -1,0 +1,53 @@
+Worker HOME permission fix verification
+Date: 2026-08-13 UTC
+
+Baseline image
+  ghcr.1ms.run/moumouhao12138-sketch/slime-worker:0.0.37
+
+Baseline command
+  docker run --rm --user 1000:1000 --entrypoint /bin/bash \
+    ghcr.1ms.run/moumouhao12138-sketch/slime-worker:0.0.37 \
+    -lc 'codex --version; stat -c "%u:%g %a %n" /home/kali/.codex'
+
+Baseline literal result
+  WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)
+  codex-cli 0.144.6
+  0:0 755 /home/kali/.codex
+  exit status: 0 (the warning predicts the later codex exec failure)
+
+Modified image
+  ghcr.1ms.run/moumouhao12138-sketch/slime-worker:0.0.37-fixed
+
+Modified command
+  docker run --rm --user 1000:1000 --entrypoint /bin/bash \
+    ghcr.1ms.run/moumouhao12138-sketch/slime-worker:0.0.37-fixed \
+    -lc 'test ! -e /home/kali/.codex; codex --version >/tmp/out 2>/tmp/err; status=$?; echo "status=$status stderr_bytes=$(wc -c </tmp/err)"; stat -c "%u:%g %a %n" /home/kali/.codex /home/kali/.codex/tmp; test -z "$(find /home/kali/.codex ! -user kali -print -quit)"'
+
+Modified literal result
+  status=0 stderr_bytes=0
+  1000:1000 755 /home/kali/.codex
+  1000:1000 755 /home/kali/.codex/tmp
+  exit status: 0
+
+Full Codex initialization command
+  printf 'Reply with exactly OK.\n' | timeout 90s codex exec --json \
+    --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox \
+    -c features.plugins=false -c features.remote_plugin=false \
+    -c features.plugin_sharing=false -c model_reasoning_effort='xhigh' \
+    --model gpt-5.6-sol -C /workspace -
+
+Full Codex literal result (relevant records)
+  {"type":"thread.started","thread_id":"019ffbad-a4fe-7a00-82c6-0df300f67f7f"}
+  {"type":"turn.started"}
+  {"type":"error","message":"Reconnecting... 2/5 (request timed out)"}
+  exit status: 124 after the explicit 90-second timeout
+
+Interpretation
+  The former local PATH-alias and in-process app-server EACCES/EPERM failure is gone.
+  Codex initialized its local app server, created a thread, and started a model turn.
+  The remaining timeout occurred after initialization at the upstream request layer.
+
+Service verification
+  API: {"ok":true,"version":"0.0.37"}
+  Dispatcher: worker_health worker=codex-native healthy=True status=200 detail=-
+  Worker bootstrap image: exit status 0

@@ -74,6 +74,19 @@ class ModelEndpointTests(unittest.TestCase):
         self.assertEqual(sent.get_header("Anthropic-version"), "2023-06-01")
         self.assertIn(b'"max_tokens":10', sent.data)
 
+    def test_complete_gateway_endpoint_uses_fragment_safe_client_base(self):
+        endpoint = ModelEndpoint(
+            "https://gateway.example/llm-gateway/proxy/e/abc",
+            "secret",
+            "openai-responses",
+            complete_gateway_endpoint=True,
+        )
+        self.assertEqual(endpoint.request_url(), "https://gateway.example/llm-gateway/proxy/e/abc")
+        self.assertEqual(
+            endpoint.client_base_url(),
+            "https://gateway.example/llm-gateway/proxy/e/abc#",
+        )
+
     def test_openai_chat_probe_uses_chat_completions_protocol(self):
         endpoint = ModelEndpoint(
             "https://models.example/v1",

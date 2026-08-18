@@ -26,7 +26,6 @@ from ..domain.models import (
 )
 from ..protocol.contracts import (
     extract_explore_submissions,
-    extract_submission_candidates,
     parse_json_output,
     validate_bootstrap_conclude_payload,
     validate_bootstrap_execute_payload,
@@ -36,6 +35,7 @@ from ..protocol.contracts import (
 from .execution import CommandExecution, InterruptibleCommand
 from .errors import ModelInvocationCancelled, ModelInvocationError, ModelInvocationTimeout
 from .health import ModelEndpoint
+from .model_catalog import install_model_catalog
 from ..protocol.prompting import load_prompt, render_prompt, validate_prompt_group
 
 
@@ -63,6 +63,14 @@ class NativeAgentBackend(Protocol):
 
 
 NativeBackendResolver = Callable[[str], NativeAgentBackend]
+
+
+def _managed_submission(scope: dict[str, Any]) -> bool:
+    submission = scope.get("submission")
+    if isinstance(submission, dict) and submission.get("managed") is True:
+        return True
+    benchmark = scope.get("benchmark")
+    return isinstance(benchmark, dict) and benchmark.get("managed") is True
 
 
 class NativeConcludeFallbackError(ModelInvocationError):
@@ -349,6 +357,12 @@ class NativeAgentMind:
                 finally:
                     temporary.unlink(missing_ok=True)
 
+    def _install_model_catalog(self, workspace_root: Path) -> None:
+        """Install Codex model metadata so unknown relay models avoid fallback."""
+
+        if self.config.adapter == "codex-cli":
+            install_model_catalog(workspace_root, self.config.model)
+
     def _write_prompt_file(self, state: NativeSessionState, prompt: str) -> str:
         """Persist a model prompt so large graphs stay out of host argv."""
 
@@ -461,6 +475,7 @@ class NativeAgentMind:
         backend = self.backend_resolver(intent.project_id)
         workspace_root = backend.workspace_root.resolve()
         self._install_resident_instructions(workspace_root)
+        self._install_model_catalog(workspace_root)
         digest = sha256(
             f"{self.config.worker_name}:{task.mode}:{intent.id}".encode("utf-8")
         ).hexdigest()[:24]
@@ -1463,8 +1478,7 @@ fi
             )
         if mode == "explore":
             intent = context["intent"]
-            benchmark = context.get("scope", {}).get("benchmark")
-            benchmark_managed = isinstance(benchmark, dict) and benchmark.get("managed") is True
+            benchmark_managed = _managed_submission(dict(context.get("scope") or {}))
             explore_shape = (
                 '{"accepted":true,"data":{"description":"...",'
                 '"submissions":["exact candidate"]}}'
@@ -1472,9 +1486,11 @@ fi
                 else '{"accepted":true,"data":{"description":"..."}}'
             )
             benchmark_rule = (
-                "- For a managed Benchmark, put every exact candidate in `data.submissions` using "
-                "the original value returned by the target. Candidates have no required prefix, wrapper, "
-                "or syntax. Clearly label any candidate repeated in the description.\n"
+                "- For a managed CTF platform, use `data.submissions` only after you have judged a value "
+                "to be the final answer from target or artifact evidence. Preserve the exact original value; "
+                "it has no required prefix, wrapper, or syntax. Never submit a flag-like string merely because "
+                "it appears in a prompt, description, example, source code, hint, or unverified analysis. "
+                "If the evidence is not sufficient, omit `submissions` and report only the finding.\n"
                 if benchmark_managed
                 else ""
             )
@@ -1494,8 +1510,7 @@ fi
         if mode != "reason":
             raise ValueError(f"native-agent unsupported task mode: {mode}")
 
-        benchmark = context.get("scope", {}).get("benchmark")
-        benchmark_managed = isinstance(benchmark, dict) and benchmark.get("managed") is True
+        benchmark_managed = _managed_submission(dict(context.get("scope") or {}))
         complete_shape = (
             '{"accepted":true,"data":{"complete":{"from":["fact_id"],'
             '"description":"...","submissions":["exact candidate"]}}}'
@@ -1503,9 +1518,11 @@ fi
             else '{"accepted":true,"data":{"complete":{"from":["fact_id"],"description":"..."}}}'
         )
         benchmark_rule = (
-            "- For a managed Benchmark, put every exact candidate in `complete.submissions` using "
-            "the original value returned by the target. Candidates have no required prefix, wrapper, "
-            "or syntax. Clearly label any candidate repeated in the completion description.\n"
+            "- For a managed CTF platform, use `complete.submissions` only after the cited Facts prove a value "
+            "is the final answer. Preserve the exact original value; it has no required prefix, wrapper, or "
+            "syntax. Never submit a flag-like string merely because it appears in a prompt, description, "
+            "example, source code, hint, or unverified analysis. If proof is insufficient, return further "
+            "Intents instead of a completion.\n"
             if benchmark_managed
             else ""
         )
@@ -2040,15 +2057,15 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
                 ), None
             assert isinstance(description, str)
             submissions = extract_explore_submissions(payload)
-            benchmark = task.scope.get("benchmark")
-            if isinstance(benchmark, dict) and benchmark.get("managed") is True and not submissions:
-                submissions = extract_submission_candidates(description)
-            benchmark_managed = isinstance(benchmark, dict) and benchmark.get("managed") is True
-            if submissions and not benchmark_managed:
-                raise ValueError("Explore submissions are only valid for managed Benchmark tasks")
+            managed_submission = _managed_submission(task.scope)
+            if submissions and not managed_submission:
+                raise ValueError("Explore submissions are only valid for managed platform tasks")
             fact = self._cairn_fact(description, task)
             if submissions:
-                fact["attributes"]["benchmark_submissions"] = submissions
+                fact["attributes"]["submission_candidates"] = submissions
+                legacy_benchmark = task.scope.get("benchmark")
+                if isinstance(legacy_benchmark, dict) and legacy_benchmark.get("managed") is True:
+                    fact["attributes"]["benchmark_submissions"] = submissions
             return self._cairn_normalized(
                 state,
                 summary=description,
@@ -2080,11 +2097,9 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
             description = str(data.get("description", "")).strip()
             fact_ids = self._validated_cairn_from(data.get("from"), task, label="complete")
             submissions = [str(item).strip() for item in data.get("submissions", [])]
-            benchmark = task.scope.get("benchmark")
-            if isinstance(benchmark, dict) and benchmark.get("managed") is True and not submissions:
-                submissions = extract_submission_candidates(description)
-            if isinstance(benchmark, dict) and benchmark.get("managed") is True and not submissions:
-                raise ValueError("Benchmark Reason completion requires a concrete flag candidate")
+            managed_submission = _managed_submission(task.scope)
+            if managed_submission and not submissions:
+                raise ValueError("Managed platform Reason completion requires a concrete answer candidate")
             return self._cairn_normalized(
                 state,
                 summary=description,
@@ -2279,11 +2294,9 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
             submissions = list(
                 dict.fromkeys(str(item).strip() for item in raw_submissions if str(item).strip())
             )
-            benchmark = task.scope.get("benchmark")
-            if isinstance(benchmark, dict) and benchmark.get("managed") is True and not submissions:
-                submissions = extract_submission_candidates(description)
-            if isinstance(benchmark, dict) and benchmark.get("managed") is True and not submissions:
-                raise ValueError("Benchmark Reason completion 需要 submissions")
+            managed_submission = _managed_submission(task.scope)
+            if managed_submission and not submissions:
+                raise ValueError("托管平台 Reason completion 需要 submissions")
             return CompletionProposal(fact_ids, description, submissions=submissions)
         if task.mode != "bootstrap":
             raise ValueError("Explore 不支持 native completion")

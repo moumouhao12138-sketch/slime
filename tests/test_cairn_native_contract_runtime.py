@@ -270,8 +270,12 @@ class CairnNativeContractRuntimeTests(unittest.TestCase):
             report.candidate_facts[0].attributes["benchmark_submissions"],
             ["flag{one}"],
         )
+        self.assertEqual(
+            report.candidate_facts[0].attributes["submission_candidates"],
+            ["flag{one}"],
+        )
 
-    def test_managed_benchmark_legacy_reason_completion_extracts_flag_from_description(self) -> None:
+    def test_managed_benchmark_reason_completion_requires_explicit_submissions(self) -> None:
         source = self.fact("fact-reason-source", "confirmed source evidence")
         payload = {
             "summary": "the benchmark goal is complete",
@@ -292,10 +296,11 @@ class CairnNativeContractRuntimeTests(unittest.TestCase):
             intent_id="intent-reason-auto-flag",
         )
 
-        self.assertIsNotNone(report.completion)
-        self.assertEqual(report.completion.submissions, ["flag{one}"])
+        self.assertEqual(report.status, "failed")
+        self.assertIsNone(report.completion)
+        self.assertIn("需要 submissions", report.errors[0])
 
-    def test_managed_benchmark_reason_completion_extracts_flag_without_submissions(self) -> None:
+    def test_managed_benchmark_cairn_reason_completion_requires_explicit_submissions(self) -> None:
         source = self.fact("fact-cairn-reason-source", "confirmed source evidence")
         payload = {
             "accepted": True,
@@ -315,8 +320,9 @@ class CairnNativeContractRuntimeTests(unittest.TestCase):
             intent_id="intent-cairn-reason-auto-flag",
         )
 
-        self.assertIsNotNone(report.completion)
-        self.assertEqual(report.completion.submissions, ["flag{two}"])
+        self.assertEqual(report.status, "failed")
+        self.assertIsNone(report.completion)
+        self.assertIn("requires a concrete answer candidate", report.errors[0])
 
     def test_explore_placeholder_uses_same_session_conclude_before_writing_fact(self) -> None:
         placeholder = {

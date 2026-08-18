@@ -29,6 +29,7 @@ class ModelEndpoint:
     base_url: str
     api_key: str = field(repr=False)
     protocol: str = "openai-responses"
+    complete_gateway_endpoint: bool = False
 
     def __post_init__(self) -> None:
         base_url = self.base_url.strip().rstrip("/")
@@ -45,12 +46,26 @@ class ModelEndpoint:
         object.__setattr__(self, "base_url", base_url)
 
     def request_url(self) -> str:
+        if self.complete_gateway_endpoint:
+            return self.base_url
         suffix = {
             "anthropic-messages": "/v1/messages",
             "openai-chat-completions": "/chat/completions",
             "openai-responses": "/responses",
         }[self.protocol]
         return f"{self.base_url}{suffix}"
+
+    def client_base_url(self) -> str:
+        """Return the base URL passed to an SDK that appends its API path.
+
+        A competition gateway can be issued for an already complete upstream
+        endpoint.  Appending a fragment keeps SDK path joining intact while
+        making the HTTP request target the complete gateway URL.
+        """
+
+        if self.complete_gateway_endpoint and "#" not in self.base_url:
+            return f"{self.base_url}#"
+        return self.base_url
 
     def public_config(self) -> dict[str, str]:
         return {

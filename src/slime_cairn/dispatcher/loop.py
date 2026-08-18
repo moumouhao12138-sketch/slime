@@ -22,6 +22,8 @@ from ..domain.branch_policy import (
 from ..domain.models import Intent, new_id
 from ..server.blackboard import Blackboard
 from ..workers.health import ModelEndpoint
+from ..workers.model_gateway import competition_gateway_full_endpoint
+from ..workers.model_gateway import validate_competition_model_route
 from ..workers.native import NativeAgentConfig, NativeAgentMind, NativeBackendResolver
 from .scheduler import Scheduler
 
@@ -243,28 +245,40 @@ def _explicit_model_endpoint(
 
     if worker_type == "codex-cli":
         model = required("CODEX_MODEL")
+        complete_gateway_endpoint = competition_gateway_full_endpoint(
+            worker_type, required("CODEX_BASE_URL"), "openai-responses", os.environ
+        )
         endpoint = ModelEndpoint(
             base_url=required("CODEX_BASE_URL"),
             api_key=required("OPENAI_API_KEY"),
             protocol="openai-responses",
+            complete_gateway_endpoint=complete_gateway_endpoint,
         )
+        validate_competition_model_route(worker_type, endpoint.base_url, endpoint.protocol, os.environ)
         provider = str(entry.get("provider", "slime_cairn")).strip() or "slime_cairn"
         overrides = {
             "model_provider": provider,
             f"model_providers.{provider}.name": provider,
             f"model_providers.{provider}.wire_api": "responses",
-            f"model_providers.{provider}.base_url": endpoint.base_url,
+            f"model_providers.{provider}.base_url": endpoint.client_base_url(),
             f"model_providers.{provider}.env_key": "OPENAI_API_KEY",
+            "model_catalog_json": "/workspace/.codex-model-catalog.json",
         }
         return model, provider, endpoint, overrides
 
     if worker_type == "claude-code":
         model = required("ANTHROPIC_MODEL")
+        complete_gateway_endpoint = competition_gateway_full_endpoint(
+            worker_type, required("ANTHROPIC_BASE_URL"), "anthropic-messages", os.environ
+        )
         endpoint = ModelEndpoint(
             base_url=required("ANTHROPIC_BASE_URL"),
             api_key=required("ANTHROPIC_AUTH_TOKEN"),
             protocol="anthropic-messages",
+            complete_gateway_endpoint=complete_gateway_endpoint,
         )
+        validate_competition_model_route(worker_type, endpoint.base_url, endpoint.protocol, os.environ)
+        environment["ANTHROPIC_BASE_URL"] = endpoint.client_base_url()
         return model, "", endpoint, {}
 
     model = required("PI_MODEL")
@@ -280,9 +294,13 @@ def _explicit_model_endpoint(
         base_url=required("PI_BASE_URL"),
         api_key=required("PI_API_KEY"),
         protocol=protocol,
+        complete_gateway_endpoint=competition_gateway_full_endpoint(
+            worker_type, required("PI_BASE_URL"), protocol, os.environ
+        ),
     )
+    validate_competition_model_route(worker_type, endpoint.base_url, endpoint.protocol, os.environ)
     environment["SLIME_PI_MODEL"] = model
-    environment["SLIME_PI_BASE_URL"] = endpoint.base_url
+    environment["SLIME_PI_BASE_URL"] = endpoint.client_base_url()
     environment["SLIME_PI_PROVIDER_API"] = provider_api
     return model, "slime_cairn", endpoint, {}
 

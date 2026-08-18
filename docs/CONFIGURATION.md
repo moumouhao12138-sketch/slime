@@ -108,6 +108,40 @@ BENCHMARK_AUTOMATION_INTERVAL=3
 
 只有 `BENCHMARK_BASE_URL` 和 `BENCHMARK_TOKEN` 同时有效时，评测控制面才会启用。Token 只用于服务端调用，不写入 Worker 提示词。
 
+### 1.7 比赛 AI Agent API
+
+```dotenv
+AGENT_MATCH_BASE_URL=https://<platform-host>
+AGENT_MATCH_ACCESS_KEY=replace-with-agent-access-key
+AGENT_MATCH_TIMEOUT=30
+AGENT_MATCH_ENV_POLL_INTERVAL=3
+AGENT_MATCH_ENV_READY_TIMEOUT=180
+```
+
+`AGENT_MATCH_BASE_URL` 是平台主机地址；程序会固定调用其
+`/slab-match/api/v1/agent` 路径。AccessKey 只在 API/Dispatcher 控制面使用，
+不进入项目 scope、Worker 环境、提示词、Blackboard、日志或本地 API 响应。
+
+通过本地 API 启动题目时，系统会读取详情；若环境尚未初始化，会请求启动并按
+`AGENT_MATCH_ENV_POLL_INTERVAL` 轮询，直到环境可用或达到
+`AGENT_MATCH_ENV_READY_TIMEOUT`。题目下发的端点、附件和账号信息会作为项目范围
+与上下文写入 Blackboard。
+
+本地接口包括：`GET /agent-match/exercises`、`POST /agent-match/exercises/{id}/start`、
+`POST /agent-match/exercises/{id}/submit` 与
+`POST /agent-match/exercises/{id}/recover`。竞赛规则、排名和公告也分别通过
+`/agent-match/match-info`、`/agent-match/overview` 和 `/agent-match/notices` 暴露。
+
+### 1.8 比赛大模型网关
+
+比赛期间应将 Worker 的 `*_BASE_URL` 设为控制台展示的完整网关 URL，模型 API Key
+仍使用上游服务商的 Key。不要将 `AGENT_MATCH_ACCESS_KEY` 作为模型 Key 使用。
+
+Codex Worker 使用 OpenAI Responses 协议，因此网关必须可转发 `/responses`。将
+`SLIME_COMPETITION_GATEWAY_ONLY=true` 后，可使用 `*_UPSTREAM_ENDPOINT` 声明每个
+Worker 对应的完整上游端点；启动时会拒绝非 HTTPS 网关 URL、未授权端点或协议不匹配
+的配置。完整授权端点与按适配器选择规则见 [COMPETITION.md](COMPETITION.md)。
+
 ## 2. `dispatch.json`
 
 顶层结构：

@@ -291,7 +291,7 @@ class BenchmarkIntegrationTests(unittest.TestCase):
             ],
         )
 
-    def test_fact_flag_is_submitted_without_explicit_submissions_field(self) -> None:
+    def test_fact_flag_in_description_is_not_submitted_without_explicit_submissions_field(self) -> None:
         project_id = self.controller.start("web_fixture_01")["project"]["id"]
         scheduler = Scheduler(
             self.board,
@@ -320,15 +320,15 @@ class BenchmarkIntegrationTests(unittest.TestCase):
             retry_failed=True,
         )
 
-        self.assertEqual(self.platform.submit_calls, 2)
-        self.assertEqual(result["benchmark_submission"]["progress"]["correct_flag_count"], 2)
+        self.assertEqual(self.platform.submit_calls, 0)
+        self.assertIsNone(result["benchmark_submission"])
         verified = [
             fact for fact in self.board.list_facts(project_id)
             if fact.predicate == "benchmark_flag_verified"
         ]
-        self.assertEqual({fact.object for fact in verified}, {"flag{one}", "flag{two}"})
+        self.assertEqual(verified, [])
 
-    def test_fact_candidate_with_arbitrary_format_is_submitted(self) -> None:
+    def test_fact_candidate_with_arbitrary_format_is_not_submitted_without_explicit_submissions(self) -> None:
         self.platform.correct_flags = {
             "TOKEN-ONE": 0,
             "88341566-f0b6-4b1a-bde8-e45ba8ed52f8": 1,
@@ -361,8 +361,8 @@ class BenchmarkIntegrationTests(unittest.TestCase):
             retry_failed=True,
         )
 
-        self.assertEqual(self.platform.submit_calls, 2)
-        self.assertEqual(result["benchmark_submission"]["progress"]["correct_flag_count"], 2)
+        self.assertEqual(self.platform.submit_calls, 0)
+        self.assertIsNone(result["benchmark_submission"])
 
     def test_client_normalizes_business_and_framework_errors(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
