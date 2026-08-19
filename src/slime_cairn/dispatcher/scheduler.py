@@ -84,6 +84,19 @@ class Scheduler:
         )
 
     @staticmethod
+    def _start_mode(project: Any) -> str:
+        """Return the explicit startup mode while accepting legacy scopes."""
+
+        value = str(project.scope.get("start_mode") or "").strip().lower()
+        if value in {"growth", "direct", "hybrid"}:
+            return value
+        return "direct" if bool(project.scope.get("bootstrap_enabled", True)) else "growth"
+
+    @classmethod
+    def _hybrid_bootstrap(cls, project: Any, mode: str) -> bool:
+        return mode == "bootstrap" and cls._start_mode(project) == "hybrid"
+
+    @staticmethod
     def _managed_submission_metadata(project: Any) -> dict[str, Any] | None:
         submission = project.scope.get("submission")
         if isinstance(submission, dict) and submission.get("managed") is True:
@@ -271,6 +284,7 @@ class Scheduler:
             "title": project.name,
             "origin": str(project.scope.get("origin") or project.target),
             "goal": project.goal,
+            "start_mode": self._start_mode(project),
             "bootstrap_enabled": bool(project.scope.get("bootstrap_enabled", True)),
         }
         if hints:
@@ -827,7 +841,8 @@ class Scheduler:
         completion_rejection = ""
         benchmark_submission: dict[str, Any] | None = None
         submission_metadata = self._managed_submission_metadata(project)
-        if submission_metadata:
+        hybrid_bootstrap = self._hybrid_bootstrap(project, mode)
+        if submission_metadata and not hybrid_bootstrap:
             explicit_candidates: list[str] = []
             candidate_fact_ids: list[str] = []
             for candidate_index, candidate in enumerate(report.candidate_facts):
@@ -872,6 +887,20 @@ class Scheduler:
         if report.completion is not None:
             if mode != "bootstrap":
                 completion_rejection = f"{mode} completion is not handled by an Intent worker"
+            elif hybrid_bootstrap:
+                completion_rejection = (
+                    "Hybrid startup defers Bootstrap completion until Reason has created "
+                    "the Slime exploration branches"
+                )
+                self.board.add_event(
+                    self.project_id,
+                    "bootstrap.completion_deferred",
+                    {
+                        "intent_id": intent.id,
+                        "worker_name": worker_name,
+                        "reason": completion_rejection,
+                    },
+                )
             else:
                 selected_indexes = list(report.completion.candidate_fact_indexes)
                 selected_facts = [

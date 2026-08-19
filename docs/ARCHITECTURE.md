@@ -147,7 +147,7 @@ API 与 Dispatcher 不通过进程内对象共享状态。任何需要跨服务�
 
 ### Bootstrap
 
-仅在 `direct` 启动模式下创建。Bootstrap 负责首次观察、建立初始 Fact，并允许简单项目直接生成 Completion。
+仅在 `direct` 和 `hybrid` 启动模式下创建。Bootstrap 负责首次观察、建立初始 Fact；`direct` 允许简单项目直接生成 Completion，`hybrid` 会把完成判断交给后续 Reason 分支。
 
 ### Explore
 

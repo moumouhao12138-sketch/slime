@@ -148,8 +148,8 @@ class CliTests(unittest.TestCase):
             with self.assertRaisesRegex(CliError, "returned invalid JSON"):
                 ApiClient("http://api").request("GET", "/projects")
 
-    def test_new_creates_project_with_growth_or_direct_start_mode(self):
-        for mode, bootstrap_enabled in (("growth", False), ("direct", True)):
+    def test_new_creates_project_with_all_start_modes(self):
+        for mode, bootstrap_enabled in (("growth", False), ("direct", True), ("hybrid", True)):
             with self.subTest(mode=mode):
                 client = FakeApiClient(
                     {
@@ -179,6 +179,7 @@ class CliTests(unittest.TestCase):
                 )
                 payload = client.calls[0][2]
                 self.assertEqual(payload["bootstrap_enabled"], bootstrap_enabled)
+                self.assertEqual(payload["start_mode"], mode)
                 self.assertEqual(payload["allowed_targets"], ["https://target.example/"])
                 self.assertIn("Project created: fixture", output)
 

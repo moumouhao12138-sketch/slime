@@ -46,6 +46,10 @@ class ProjectInput(BaseModel):
     allowed_targets: list[str] = Field(default_factory=list)
     title: str | None = None
     origin: str | None = None
+    # ``start_mode`` is the explicit three-way API.  ``bootstrap_enabled`` is
+    # retained for older clients that only know the original growth/direct
+    # switch.
+    start_mode: Literal["growth", "direct", "hybrid"] | None = None
     bootstrap_enabled: bool = True
     hints: list[dict] = Field(default_factory=list)
 
@@ -455,16 +459,18 @@ def create_project(payload: ProjectInput) -> dict:
     if not goal:
         raise HTTPException(422, "project goal is required")
     allowed = payload.allowed_targets or [target]
+    start_mode = payload.start_mode or ("direct" if payload.bootstrap_enabled else "growth")
     scope = {
         "targets": allowed,
         "origin": payload.origin or target,
-        "bootstrap_enabled": payload.bootstrap_enabled,
+        "start_mode": start_mode,
+        "bootstrap_enabled": start_mode in {"direct", "hybrid"},
         "hints": payload.hints,
     }
     project = board.create_project(name, target, goal, scope)
     board.ensure_scope_hints(project.id)
     seed_project_context_facts(board, project)
-    if payload.bootstrap_enabled:
+    if scope["bootstrap_enabled"]:
         bootstrap = IntentProposal(
             kind="bootstrap",
             objective="Freely observe the target, gather first evidence-backed facts, and try to advance directly toward the goal.",

@@ -346,7 +346,7 @@
     .project-create-fields { display: grid; gap: 13px; }
     .field-group { min-width: 0; }
     .start-mode-field { min-width: 0; }
-    .start-mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; background: #f2f6f6; }
+    .start-mode-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; background: #f2f6f6; }
     .start-mode-option { position: relative; min-width: 0; cursor: pointer; }
     .start-mode-option + .start-mode-option { border-left: 1px solid var(--line-strong); }
     .start-mode-option input { position: absolute; width: 1px; height: 1px; margin: -1px; clip: rect(0, 0, 0, 0); overflow: hidden; }
@@ -543,6 +543,10 @@
               <label class="start-mode-option">
                 <input id="new-project-direct" name="new-project-start-mode" type="radio" value="direct">
                 <span>Cairn 直推</span>
+              </label>
+              <label class="start-mode-option">
+                <input id="new-project-hybrid" name="new-project-start-mode" type="radio" value="hybrid">
+                <span>Bootstrap 后分支</span>
               </label>
             </div>
           </div>
@@ -1845,7 +1849,8 @@
               origin: target,
               goal,
               allowed_targets: [target],
-              bootstrap_enabled: byId("new-project-direct").checked,
+              start_mode: document.querySelector('input[name="new-project-start-mode"]:checked')?.value || "growth",
+              bootstrap_enabled: byId("new-project-direct").checked || byId("new-project-hybrid").checked,
               hints: newProjectHints(),
             }),
           });

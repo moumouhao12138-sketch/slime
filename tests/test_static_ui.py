@@ -71,6 +71,7 @@ class StaticUiTests(unittest.TestCase):
             "new-project-goal",
             "new-project-growth",
             "new-project-direct",
+            "new-project-hybrid",
             "new-project-add-hint",
             "new-project-hint-list",
             "new-project-confirm",
@@ -79,7 +80,8 @@ class StaticUiTests(unittest.TestCase):
 
         self.assertIn("function addNewProjectHint", html)
         self.assertIn('await request("/projects", {', html)
-        self.assertIn('bootstrap_enabled: byId("new-project-direct").checked', html)
+        self.assertIn('bootstrap_enabled: byId("new-project-direct").checked || byId("new-project-hybrid").checked', html)
+        self.assertIn('start_mode: document.querySelector(\'input[name="new-project-start-mode"]:checked\')?.value || "growth"', html)
         self.assertIn('id="new-project-growth" name="new-project-start-mode" type="radio" value="growth" checked', html)
         self.assertIn("hints: newProjectHints()", html)
         self.assertIn("state.selectedProjectId = project.id", html)

@@ -176,7 +176,9 @@ class SlimeCli:
             "target": target,
             "goal": goal,
             "allowed_targets": [target],
-            "bootstrap_enabled": self.args.start_mode == "direct",
+            "start_mode": self.args.start_mode,
+            # Keep the legacy field for older API deployments.
+            "bootstrap_enabled": self.args.start_mode in {"direct", "hybrid"},
         }
         result = self.client.request("POST", "/projects", payload)
         project = self._mapping(result, "project", "create project")
@@ -370,9 +372,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--goal", default=DEFAULT_GOAL, help="project goal")
     parser.add_argument(
         "--start-mode",
-        choices=("growth", "direct"),
+        choices=("growth", "direct", "hybrid"),
         default="growth",
-        help="create with Reason growth or a bootstrap Intent",
+        help="create with Reason growth, a bootstrap Intent, or bootstrap then growth",
     )
     parser.add_argument("--intent-id", default="", help="Intent to retry")
     parser.add_argument(

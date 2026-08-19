@@ -214,6 +214,56 @@ class CairnRuntimeTests(unittest.TestCase):
         run = self.board.list_worker_runs(self.project.id)[0]
         self.assertEqual(run["validation"]["direct_completion"]["fact_ids"], [proof.id])
 
+    def test_hybrid_bootstrap_defers_completion_for_reason_branching(self):
+        project = self.board.create_project(
+            "hybrid-test",
+            self.target,
+            "establish facts, then branch into exploration",
+            {
+                "targets": [self.target],
+                "start_mode": "hybrid",
+                "bootstrap_enabled": True,
+            },
+        )
+        evidence_ref = "evidence://fixture/hybrid-proof"
+        self.board.register_evidence(project.id, evidence_ref, "fixture")
+        report = PseudopodReport(
+            pseudopod_id="hybrid-pseudopod",
+            intent_id="ignored",
+            mode="bootstrap",
+            status="completed",
+            candidate_facts=[
+                FactCandidate(self.target, "initial_observation", "confirmed", 1.0, [evidence_ref])
+            ],
+            candidate_hypotheses=[],
+            evidence_refs=[evidence_ref],
+            proposed_intents=[],
+            tool_calls=1,
+            progress_score=1.0,
+            stop_reason="bootstrap_facts_ready",
+            completion=CompletionProposal([0], "the initial observation appears sufficient"),
+        )
+        mind = ReportMind(report)
+        workspace = IsolatedWorkspace(Path(self.temporary.name) / "hybrid-workspace")
+        scheduler = Scheduler(self.board, project.id, mind=mind, workspace=workspace)
+        scheduler.seed(self.target)
+        intent = self.board.claim_next_intent(project.id, "hybrid-owner")
+        self.assertIsNotNone(intent)
+
+        outcome = scheduler.process_claimed_intent(
+            intent,
+            mind=mind,
+            worker_name="codex-bootstrap",
+            owner_token="hybrid-owner",
+        )
+
+        self.assertEqual(self.board.get_project(project.id).status, "running")
+        self.assertIsNone(outcome["completion"])
+        self.assertIn("defers Bootstrap completion", outcome["completion_rejection"])
+        self.assertTrue(
+            any(event["kind"] == "bootstrap.completion_deferred" for event in self.board.list_events(project.id))
+        )
+
     def test_invalid_execute_uses_same_session_for_bootstrap_conclude(self):
         first_stdout = "\n".join(
             [

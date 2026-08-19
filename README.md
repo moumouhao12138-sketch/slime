@@ -117,6 +117,8 @@ Compose 服务。因此修改源码、默认 Prompt 或 `AGENTS.md` 后无需先
 
 `pause` 和 `stop` 等价。业务命令由启动器转发到 `api` 容器内的 Slime CLI，因此宿主机不需要安装 Python 包。
 
+`--start-mode` 支持 `growth`（先 Reason 分支）、`direct`（先 Bootstrap，必要时继续）和 `hybrid`（先 Bootstrap 建立事实，再强制进入 Reason 分支）。
+
 ## 并发与分支
 
 默认配置位于 `dispatch.json`：

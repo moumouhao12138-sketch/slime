@@ -38,6 +38,7 @@
 |---|---|---|
 | `growth` | 先运行 Reason，由 Reason 创建多个 Explore Intent | 需要并行拆解和持续探索的任务 |
 | `direct` | 先运行一次 Bootstrap；必要时再进入 Reason/Explore | 目标明确、可能一次完成的任务 |
+| `hybrid` | 先运行 Bootstrap 建立初始事实，再强制进入 Reason 创建 Explore 分支 | 需要先摸清入口、再多方向并行探索的任务 |
 
 创建成功后项目状态为 `running`，Dispatcher 会自动发现并调度，无需单独启动 Worker。
 
@@ -75,6 +76,10 @@
 ### Bootstrap
 
 `direct` 模式的首次任务。它建立初始事实，并可以在证据充分时直接完成项目。
+
+### 混合启动
+
+`hybrid` 模式先执行一次 Bootstrap，但 Bootstrap 只负责建立初始事实，不直接结束项目；随后由 Reason 读取这些事实并创建黏菌式 Explore 分支。
 
 ### Explore
 
