@@ -7,16 +7,35 @@ USER root
 
 RUN if [ "${INSTALL_CTF_REFERENCE_ASSETS}" = "true" ]; then \
         mkdir -p /home/kali/knowledges; \
-        git clone --depth 1 https://github.com/ctf-wiki/ctf-wiki.git /home/kali/knowledges/CTF-Wiki; \
-        git clone --depth 1 https://github.com/ProbiusOfficial/Hello-CTF.git /home/kali/knowledges/Hello-CTF; \
-        git clone --depth 1 https://github.com/firmianay/CTF-All-In-One.git /home/kali/knowledges/CTF-All-In-One; \
-        git clone --depth 1 https://github.com/trailofbits/ctf.git /home/kali/knowledges/CTF-Field-Guide; \
-        git clone --depth 1 https://github.com/shellphish/how2heap.git /home/kali/knowledges/how2heap; \
-        git clone --depth 1 https://github.com/RPISEC/MBE.git /home/kali/knowledges/MBE; \
-        git clone --depth 1 https://github.com/jvdsn/crypto-attacks.git /home/kali/knowledges/crypto-attacks; \
-        git clone --depth 1 https://github.com/ljagiello/ctf-skills.git /home/kali/knowledges/ctf-skills; \
+        clone_sparse() { \
+            url="$1"; destination="$2"; \
+            git clone --depth 1 --filter=blob:none --no-checkout --sparse "$url" "$destination"; \
+            git -C "$destination" sparse-checkout set --no-cone \
+                '*.md' '*.py' '*.c' '*.cc' '*.cpp' '*.h' '*.s' '*.asm' '*.sh' \
+                '*.rb' '*.go' '*.rs' '*.java' '*.php' '*.txt' '*.adoc' '*.rst' \
+                'LICENSE*' 'Dockerfile*' 'Makefile'; \
+            git -C "$destination" checkout --quiet; \
+        }; \
+        clone_sparse https://github.com/ctf-wiki/ctf-wiki.git /home/kali/knowledges/CTF-Wiki; \
+        clone_sparse https://github.com/ProbiusOfficial/Hello-CTF.git /home/kali/knowledges/Hello-CTF; \
+        clone_sparse https://github.com/firmianay/CTF-All-In-One.git /home/kali/knowledges/CTF-All-In-One; \
+        clone_sparse https://github.com/trailofbits/ctf.git /home/kali/knowledges/CTF-Field-Guide; \
+        clone_sparse https://github.com/shellphish/how2heap.git /home/kali/knowledges/how2heap; \
+        clone_sparse https://github.com/RPISEC/MBE.git /home/kali/knowledges/MBE; \
+        clone_sparse https://github.com/jvdsn/crypto-attacks.git /home/kali/knowledges/crypto-attacks; \
+        clone_sparse https://github.com/ljagiello/ctf-skills.git /home/kali/knowledges/ctf-skills; \
     fi \
-    && chown -R 1000:1000 /home/kali/knowledges
+    && for directory in \
+        /home/kali/knowledges/CTF-Wiki \
+        /home/kali/knowledges/Hello-CTF \
+        /home/kali/knowledges/CTF-All-In-One \
+        /home/kali/knowledges/CTF-Field-Guide \
+        /home/kali/knowledges/how2heap \
+        /home/kali/knowledges/MBE \
+        /home/kali/knowledges/crypto-attacks \
+        /home/kali/knowledges/ctf-skills; do \
+        [ ! -d "$directory" ] || chown -R 1000:1000 "$directory"; \
+    done
 
 COPY scripts/build_ctf_knowledge_manifest.py /usr/local/bin/build_ctf_knowledge_manifest.py
 

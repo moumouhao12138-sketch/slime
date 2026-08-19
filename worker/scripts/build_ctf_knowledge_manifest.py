@@ -61,7 +61,7 @@ REPOSITORIES = [
 def git_value(path: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
-            ["git", "-C", str(path), *args],
+            ["git", "-c", f"safe.directory={path}", "-C", str(path), *args],
             check=True,
             capture_output=True,
             text=True,
