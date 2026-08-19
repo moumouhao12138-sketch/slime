@@ -156,6 +156,8 @@ class AgentMatchIntegrationTests(unittest.TestCase):
         self.assertEqual(project.target, "198.51.100.10:30080")
         self.assertTrue(project.scope["submission"]["managed"])
         self.assertEqual(project.scope["submission"]["platform"], "agent_match")
+        self.assertEqual(project.scope["agent_match"]["category_id"], 10)
+        self.assertEqual(project.scope["agent_match"]["category_name"], "Web")
         self.assertNotIn(self.platform.access_key, json.dumps(self.board.snapshot(project_id), default=str))
         self.assertTrue(any(request.url.path.endswith("/ctf/build-exercise-env") for request in self.platform.calls))
         self.assertTrue(
@@ -175,6 +177,17 @@ class AgentMatchIntegrationTests(unittest.TestCase):
         self.assertIn("agent_match_flag_rejected", predicates)
         self.assertIn("agent_match_flag_verified", predicates)
         self.assertIn("agent_match_completion_verified", predicates)
+        generated_writeup = self.board.get_project_writeup(project_id)
+        self.assertIsNotNone(generated_writeup)
+        self.assertIn("fixture-web", generated_writeup["markdown"])
+        self.assertTrue(
+            any(
+                request.url.path.endswith("/ctf/recover-exercise-env")
+                for request in self.platform.calls
+            ),
+            "a platform-verified completion must reclaim its remote exercise environment",
+        )
+        self.assertTrue(self.board.get_project(project_id).scope["agent_match"]["environment_recovered"])
 
         recovered = self.controller.recover(1001)
         self.assertTrue(recovered["recovered"])

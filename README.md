@@ -42,6 +42,8 @@ Docker Compose 管理三个服务：
 
 默认应用镜像为 `ghcr.io/moumouhao12138-sketch/slime:0.0.37`，默认 Worker 镜像为 `ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37`。
 
+完成比赛题目后，系统会把同一赛事的所有已完成题目交给独立的 `writeup-worker` 生成一份中文团队 WP。它只读取 Blackboard 中已确认的事实、完成记录和项目工作区脚本，不参与做题、提交答案或创建 Intent；生成失败时保留现有草稿，并在 Writeup 面板显示失败原因。模型端点沿用 `SLIME_CODEX_*` 配置，也可用 `SLIME_WRITEUP_*` 单独配置。
+
 ## 系统要求
 
 - Docker Engine

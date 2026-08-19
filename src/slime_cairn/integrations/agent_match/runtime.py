@@ -11,6 +11,9 @@ from typing import Any
 from ...domain.models import Fact, FactCandidate, Project, fingerprint, new_id
 from ...domain.seeding import seed_project_context_facts
 from ...server.blackboard import Blackboard
+from ...server.writeups import collect_team_entries, generate_team_writeup, generate_writeup, project_competition_key
+from ...workers.writeup import configured as writeup_worker_configured
+from ...workers.writeup import queue_team_writeup
 from .client import AgentMatchClient, AgentMatchError, AgentMatchSettings
 
 
@@ -37,6 +40,80 @@ class AgentMatchProjectController:
         self.board = board
         self.client = client
         self.settings = settings
+        self._category_by_exercise: dict[int, dict[str, Any]] | None = None
+
+    def _category_map(self) -> dict[int, dict[str, Any]]:
+        """Build the platform exercise-id to CTF-category mapping once per controller."""
+
+        if self._category_by_exercise is not None:
+            return self._category_by_exercise
+        mapping: dict[int, dict[str, Any]] = {}
+        for group in self.client.list_exercises():
+            if not isinstance(group, dict):
+                continue
+            group_id = group.get("id")
+            group_name = str(group.get("name") or "").strip()
+            corpus = group.get("corpus")
+            if isinstance(corpus, list):
+                for item in corpus:
+                    if not isinstance(item, dict):
+                        continue
+                    try:
+                        exercise_id = int(item.get("id"))
+                    except (TypeError, ValueError):
+                        continue
+                    mapping[exercise_id] = {
+                        "category_id": group_id,
+                        "category_name": group_name,
+                    }
+                continue
+            # Accept the flat exercise-list shape too; this keeps metadata
+            # synchronization working across both platform API versions.
+            try:
+                exercise_id = int(group.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if group.get("category_name") or group.get("category_id"):
+                mapping[exercise_id] = {
+                    "category_id": group.get("category_id"),
+                    "category_name": str(group.get("category_name") or "").strip(),
+                }
+        self._category_by_exercise = mapping
+        return mapping
+
+    def _category_for_exercise(self, exercise_id: int) -> dict[str, Any]:
+        return dict(self._category_map().get(int(exercise_id), {}))
+
+    def _persist_category(self, project: Project, category: dict[str, Any]) -> Project:
+        if project.status == "deleting" or not category:
+            return project
+        metadata = agent_match_metadata(project)
+        if not metadata:
+            return project
+        changed = any(metadata.get(key) != value for key, value in category.items() if value not in (None, ""))
+        if not changed:
+            return project
+        metadata.update({key: value for key, value in category.items() if value not in (None, "")})
+        scope = dict(project.scope)
+        scope["agent_match"] = metadata
+        return self.board.update_project_context(project.id, scope=scope)
+
+    def backfill_project_categories(self) -> int:
+        """Persist platform categories on already-completed legacy projects."""
+
+        mapping = self._category_map()
+        changed = 0
+        for project in self.board.list_projects(include_deleting=True):
+            metadata = agent_match_metadata(project)
+            if not metadata or metadata.get("task_key") != self.settings.task_key:
+                continue
+            category = mapping.get(int(metadata.get("exercise_id") or 0), {})
+            before = (metadata.get("category_id"), metadata.get("category_name"))
+            updated = self._persist_category(project, category)
+            after_metadata = agent_match_metadata(updated) or {}
+            if before != (after_metadata.get("category_id"), after_metadata.get("category_name")):
+                changed += 1
+        return changed
 
     def find_project(self, exercise_id: int) -> Project | None:
         for project in self.board.list_projects(include_deleting=True):
@@ -67,6 +144,11 @@ class AgentMatchProjectController:
                 except (TypeError, ValueError):
                     continue
                 project = self.find_project(exercise_id)
+                if project is not None:
+                    project = self._persist_category(
+                        project,
+                        {"category_id": category_id, "category_name": category_name},
+                    )
                 exercise.update(
                     {
                         "category_id": category_id,
@@ -230,6 +312,7 @@ class AgentMatchProjectController:
         }
 
         completion = None
+        environment_recovery: dict[str, Any] | None = None
         if completed:
             verified_facts = [
                 fact
@@ -277,6 +360,79 @@ class AgentMatchProjectController:
                 description,
                 worker_name,
             )
+            # A solved exercise no longer needs its remote container.  Reclaim
+            # it immediately, while keeping the Slime project completed so
+            # its facts, Flag verification and WP remain available locally.
+            environment_recovery = self._recover_after_completion(project_id, exercise_id)
+            try:
+                try:
+                    overview = self.client.overview()
+                except Exception:
+                    overview = {}
+                completed_count = sum(
+                    1
+                    for item in self.board.list_projects(include_deleting=True)
+                    if item.status == "completed"
+                    and (agent_match_metadata(item) or {}).get("task_key") == self.settings.task_key
+                )
+                writeup_markdown, validation = generate_writeup(
+                    self.board.get_project(project_id),
+                    completion,
+                    self.board.list_facts(project_id),
+                    self.board.list_evidence(project_id),
+                    self.board.list_worker_runs(project_id),
+                    team={
+                        "rank": overview.get("stageRank", overview.get("rank", "待填写")),
+                        "solved_count": completed_count,
+                    },
+                )
+                writeup = self.board.save_project_writeup(
+                    project_id,
+                    writeup_markdown,
+                    validation["status"],
+                    validation["template_version"],
+                    validation,
+                )
+                self.board.add_event(
+                    project_id,
+                    "writeup.generated",
+                    {"writeup_id": writeup["id"], "status": writeup["status"], "validation": validation},
+                )
+                team_key = project_competition_key(self.board.get_project(project_id))
+                if team_key:
+                    team_markdown, team_validation = generate_team_writeup(
+                        collect_team_entries(self.board, team_key),
+                        team={"rank": overview.get("stageRank", overview.get("rank", "待填写"))},
+                    )
+                    self.board.save_competition_writeup(
+                        team_key,
+                        team_markdown,
+                        team_validation["status"],
+                        team_validation["template_version"],
+                        team_validation,
+                    )
+                    self.board.add_event(
+                        project_id,
+                        "writeup.team_generated",
+                        {"task_key": team_key, "status": team_validation["status"], "validation": team_validation},
+                    )
+                    if writeup_worker_configured():
+                        queue_team_writeup(
+                            self.board,
+                            project_id,
+                            team={"rank": overview.get("stageRank", overview.get("rank", "待填写"))},
+                        )
+            except Exception as exc:
+                # Writeup generation is auxiliary; a verified flag remains a
+                # successful completion even if persistence is temporarily unavailable.
+                try:
+                    self.board.add_event(
+                        project_id,
+                        "writeup.validation_failed",
+                        {"error": str(exc)[:500]},
+                    )
+                except Exception:
+                    pass
 
         return {
             "project": asdict(self.board.get_project(project_id)),
@@ -285,12 +441,35 @@ class AgentMatchProjectController:
             "submission_fact_ids": list(dict.fromkeys(submission_fact_ids)),
             "progress": progress,
             "completion": completion,
+            "environment_recovery": environment_recovery,
         }
+
+    def _recover_after_completion(self, project_id: str, exercise_id: int) -> dict[str, Any]:
+        """Best-effort remote target cleanup after a platform-verified solve."""
+
+        try:
+            self.client.recover_environment(exercise_id)
+        except AgentMatchError as exc:
+            detail = {"exercise_id": int(exercise_id), "code": exc.code, "message": exc.message[:300]}
+            self.board.add_event(project_id, "agent_match.exercise_recovery_failed", detail)
+            return {"recovered": False, "project_id": project_id, "error": exc.message[:300]}
+        project = self.board.get_project(project_id)
+        metadata = agent_match_metadata(project) or {}
+        metadata.update({"environment_recovered": True, "endpoints": []})
+        scope = dict(project.scope)
+        scope["agent_match"] = metadata
+        self.board.update_project_context(project.id, scope=scope)
+        self.board.add_event(
+            project.id,
+            "agent_match.exercise_recovered",
+            {"exercise_id": int(exercise_id), "trigger": "completion"},
+        )
+        return {"recovered": True, "project_id": project_id}
 
     def recover(self, exercise_id: int) -> dict[str, Any]:
         self.client.recover_environment(exercise_id)
         project = self.find_project(exercise_id)
-        if project is not None and project.status not in {"deleting", "completed"}:
+        if project is not None and project.status != "deleting":
             metadata = agent_match_metadata(project) or {}
             metadata.update({"environment_recovered": True, "endpoints": []})
             scope = dict(project.scope)
@@ -458,6 +637,7 @@ class AgentMatchProjectController:
                 "match_note": str(match_info.get("note") or "").strip(),
                 "match_rule": str(match_info.get("rule") or "").strip(),
                 **self._metadata(detail),
+                **self._category_for_exercise(int(detail.get("id") or 0)),
             },
         }
 

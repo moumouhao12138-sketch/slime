@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict
 import os
 from pathlib import Path
+import re
 import time
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -20,7 +21,10 @@ from ..integrations.agent_match.client import AgentMatchClient, AgentMatchError,
 from ..integrations.agent_match.runtime import AgentMatchProjectController
 from ..integrations.benchmark.client import BenchmarkClient, BenchmarkError, BenchmarkSettings
 from ..integrations.benchmark.runtime import BenchmarkProjectController
+from ..workers.writeup import configured as writeup_worker_configured
+from ..workers.writeup import queue_team_writeup
 from .blackboard import Blackboard
+from .writeups import collect_team_entries, generate_team_writeup, generate_writeup, project_competition_key, validate_writeup
 
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -120,6 +124,14 @@ class BenchmarkAutomationInput(BaseModel):
 
 class AgentMatchSubmitInput(BaseModel):
     flag: str = Field(min_length=1, max_length=256)
+
+
+class WriteupGenerateInput(BaseModel):
+    team: dict = Field(default_factory=dict)
+
+
+class WriteupUpdateInput(BaseModel):
+    markdown: str = Field(min_length=1, max_length=1_000_000)
 
 
 @app.get("/health")
@@ -490,7 +502,15 @@ def _writable_project(project_id: str):
 
 @app.get("/projects")
 def list_projects() -> dict:
-    return {"projects": [asdict(project) for project in board.list_projects()]}
+    projects = []
+    for project in board.list_projects():
+        item = asdict(project)
+        key = project_competition_key(project)
+        writeup = board.get_competition_writeup(key) if key else board.get_project_writeup(project.id)
+        item["writeup_status"] = writeup["status"] if writeup else None
+        item["team_writeup_key"] = key
+        projects.append(item)
+    return {"projects": projects}
 
 
 @app.post("/projects/bulk-delete", status_code=202)
@@ -780,9 +800,182 @@ def project_view(
         _decorate_retry_view(view, observed_at)
         view["readable"] = _readable_projection(view)
         view["runtime"] = _runtime_state_payload(project_id, observed_at)
+        view["writeup"] = board.get_project_writeup(project_id)
+        managed_key = project_competition_key(board.get_project(project_id))
+        view["team_writeup"] = board.get_competition_writeup(managed_key) if managed_key else None
         return view
     except KeyError as exc:
         raise HTTPException(404, "project not found") from exc
+
+
+def _generate_project_writeup(project_id: str, team: dict | None = None) -> dict:
+    project = board.get_project(project_id)
+    if project.scope.get("agent_match", {}).get("managed") is True:
+        try:
+            controller, client = _agent_match_controller()
+            try:
+                controller.backfill_project_categories()
+                project = board.get_project(project_id)
+            finally:
+                client.close_client()
+        except (HTTPException, AgentMatchError, OSError, ValueError):
+            # Existing projects can still generate from their persisted
+            # metadata when the competition API is temporarily unavailable.
+            project = board.get_project(project_id)
+    team_data = dict(team or {})
+    managed = next(
+        (
+            value
+            for key in ("agent_match", "benchmark")
+            for value in [project.scope.get(key)]
+            if isinstance(value, dict) and value.get("managed") is True
+        ),
+        {},
+    )
+    if "solved_count" not in team_data:
+        task_key = managed.get("task_key")
+        team_data["solved_count"] = sum(
+            1
+            for item in board.list_projects(include_deleting=True)
+            if item.status == "completed"
+            and any(
+                isinstance(item.scope.get(key), dict)
+                and item.scope[key].get("managed") is True
+                and item.scope[key].get("task_key") == task_key
+                for key in ("agent_match", "benchmark")
+            )
+        )
+    markdown, validation = generate_writeup(
+        project,
+        board.get_active_completion(project_id),
+        board.list_facts(project_id),
+        board.list_evidence(project_id),
+        board.list_worker_runs(project_id),
+        team=team_data,
+    )
+    writeup = board.save_project_writeup(
+        project_id,
+        markdown,
+        validation["status"],
+        validation["template_version"],
+        validation,
+    )
+    board.add_event(
+        project_id,
+        "writeup.generated",
+        {"writeup_id": writeup["id"], "status": writeup["status"], "validation": validation},
+    )
+    team_key = project_competition_key(project)
+    if team_key:
+        team_markdown, team_validation = generate_team_writeup(
+            collect_team_entries(board, team_key), team=team_data
+        )
+        board.save_competition_writeup(
+            team_key,
+            team_markdown,
+            team_validation["status"],
+            team_validation["template_version"],
+            team_validation,
+        )
+        board.add_event(
+            project_id,
+            "writeup.team_generated",
+            {"task_key": team_key, "status": team_validation["status"], "validation": team_validation},
+        )
+    return writeup
+
+
+@app.get("/projects/{project_id}/writeup")
+def get_project_writeup(project_id: str) -> dict:
+    try:
+        project = board.get_project(project_id)
+        key = project_competition_key(project)
+        writeup = board.get_competition_writeup(key) if key else board.get_project_writeup(project_id)
+    except KeyError as exc:
+        raise HTTPException(404, "project not found") from exc
+    return {"writeup": writeup}
+
+
+@app.get("/projects/{project_id}/team-writeup")
+def get_team_writeup(project_id: str) -> dict:
+    try:
+        project = board.get_project(project_id)
+        key = project_competition_key(project)
+        if not key:
+            raise HTTPException(404, "project is not managed by a competition")
+        return {"writeup": board.get_competition_writeup(key), "task_key": key}
+    except KeyError as exc:
+        raise HTTPException(404, "project not found") from exc
+
+
+@app.post("/projects/{project_id}/writeup/generate")
+def generate_project_writeup(project_id: str, payload: WriteupGenerateInput | None = None) -> dict:
+    try:
+        _writable_project(project_id)
+        team = payload.team if payload else {}
+        writeup = _generate_project_writeup(project_id, team)
+        team_writeup = None
+        if writeup_worker_configured():
+            team_writeup = queue_team_writeup(board, project_id, team=team, force=True)
+        return {"writeup": writeup, "team_writeup": team_writeup}
+    except KeyError as exc:
+        raise HTTPException(404, "project not found") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.put("/projects/{project_id}/writeup")
+def update_project_writeup(project_id: str, payload: WriteupUpdateInput) -> dict:
+    try:
+        project = _writable_project(project_id)
+        validation = validate_writeup(payload.markdown)
+        key = project_competition_key(project)
+        if key:
+            previous = board.get_competition_writeup(key) or {}
+            previous_validation = previous.get("validation") or {}
+            validation.update({
+                "challenge_count": previous_validation.get("challenge_count", 0),
+                "token_total": previous_validation.get("token_total", 0),
+                "model_names": previous_validation.get("model_names", []),
+            })
+            writeup = board.save_competition_writeup(
+                key,
+                payload.markdown,
+                validation["status"],
+                validation.get("template_version", "1"),
+                validation,
+            )
+        else:
+            writeup = board.save_project_writeup(
+                project_id,
+                payload.markdown,
+                validation["status"],
+                validation.get("template_version", "1"),
+                validation,
+            )
+        return {"writeup": writeup}
+    except KeyError as exc:
+        raise HTTPException(404, "project not found") from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get("/projects/{project_id}/writeup/download")
+def download_project_writeup(project_id: str) -> PlainTextResponse:
+    try:
+        project = board.get_project(project_id)
+        team_key = project_competition_key(project)
+        writeup = board.get_competition_writeup(team_key) if team_key else board.get_project_writeup(project_id)
+    except KeyError as exc:
+        raise HTTPException(404, "project not found") from exc
+    if writeup is None:
+        raise HTTPException(404, "team writeup not generated")
+    filename = re.sub(r"[^A-Za-z0-9._-]+", "-", project.name).strip("-") or "writeup"
+    return PlainTextResponse(
+        writeup["markdown"],
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.md"'},
+    )
 
 
 @app.post("/projects/{project_id}/hints", status_code=201)
@@ -844,6 +1037,8 @@ def complete_project(project_id: str, payload: CompletionInput) -> dict:
             payload.description,
             payload.worker_name,
         )
+        if writeup_worker_configured():
+            queue_team_writeup(board, project_id)
     except KeyError as exc:
         raise HTTPException(404, "project not found") from exc
     except ValueError as exc:

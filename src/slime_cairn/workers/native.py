@@ -560,6 +560,7 @@ class NativeAgentMind:
             "execution": self.execution_mode,
             "adapter": f"native-{self.config.adapter}",
             "worker_name": self.config.worker_name,
+            "model": self.config.model,
             "session_scope": "task",
             "resume_policy": "same_task_conclude_only",
             "session_id": state.session_id,

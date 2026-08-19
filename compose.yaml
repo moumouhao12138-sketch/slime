@@ -39,6 +39,7 @@ services:
       - "${SLIME_BIND_ADDRESS:-127.0.0.1}:${SLIME_PORT:-8000}:8000"
     volumes:
       - slime-data:/data
+      - slime-workspaces:/workspaces:ro
     healthcheck:
       test:
         - CMD

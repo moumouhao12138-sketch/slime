@@ -80,6 +80,27 @@ class Blackboard:
             );
             CREATE UNIQUE INDEX IF NOT EXISTS one_active_completion_per_project
             ON project_completions(project_id) WHERE active = 1;
+            CREATE TABLE IF NOT EXISTS project_writeups (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL UNIQUE,
+                markdown TEXT NOT NULL,
+                status TEXT NOT NULL,
+                template_version TEXT NOT NULL,
+                validation_json TEXT NOT NULL DEFAULT '{}',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id)
+            );
+            CREATE TABLE IF NOT EXISTS competition_writeups (
+                id TEXT PRIMARY KEY,
+                task_key TEXT NOT NULL UNIQUE,
+                markdown TEXT NOT NULL,
+                status TEXT NOT NULL,
+                template_version TEXT NOT NULL,
+                validation_json TEXT NOT NULL DEFAULT '{}',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS hints (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
@@ -345,6 +366,7 @@ class Blackboard:
         # Worker thread wakes up after its Dispatcher has finished.
         project_child_tables = (
             "project_completions",
+            "project_writeups",
             "hints",
             "facts",
             "intents",
@@ -636,6 +658,7 @@ class Blackboard:
                 "dispatcher_states",
                 "reason_state",
                 "project_completions",
+                "project_writeups",
                 "hints",
                 "path_edges",
                 "fact_relations",
@@ -1086,6 +1109,110 @@ class Blackboard:
             (project_id,),
         ).fetchone()
         return self._completion_row(row) if row is not None else None
+
+    @synchronized
+    def get_project_writeup(self, project_id: str) -> dict[str, Any] | None:
+        self.get_project(project_id)
+        row = self._connection.execute(
+            "SELECT * FROM project_writeups WHERE project_id = ?", (project_id,)
+        ).fetchone()
+        return self._writeup_row(row) if row is not None else None
+
+    @synchronized
+    def save_project_writeup(
+        self,
+        project_id: str,
+        markdown: str,
+        status: str,
+        template_version: str,
+        validation: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.get_project(project_id)
+        markdown = str(markdown).strip()
+        status = str(status).strip() or "incomplete"
+        template_version = str(template_version).strip() or "1"
+        if not markdown:
+            raise ValueError("writeup markdown cannot be empty")
+        timestamp = now()
+        existing = self._connection.execute(
+            "SELECT id, created_at FROM project_writeups WHERE project_id = ?", (project_id,)
+        ).fetchone()
+        if existing is None:
+            writeup_id = new_id("writeup")
+            created_at = timestamp
+            self._connection.execute(
+                """INSERT INTO project_writeups
+                (id, project_id, markdown, status, template_version, validation_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (writeup_id, project_id, markdown, status, template_version, stable_json(validation), created_at, timestamp),
+            )
+        else:
+            writeup_id = str(existing["id"])
+            created_at = float(existing["created_at"])
+            self._connection.execute(
+                """UPDATE project_writeups SET markdown = ?, status = ?, template_version = ?,
+                validation_json = ?, updated_at = ? WHERE project_id = ?""",
+                (markdown, status, template_version, stable_json(validation), timestamp, project_id),
+            )
+        result = self._writeup_row(
+            self._connection.execute("SELECT * FROM project_writeups WHERE project_id = ?", (project_id,)).fetchone()
+        )
+        self.add_event(
+            project_id,
+            "writeup.updated",
+            {"writeup_id": writeup_id, "status": status, "updated_at": timestamp},
+        )
+        return result
+
+    @synchronized
+    def get_competition_writeup(self, task_key: str) -> dict[str, Any] | None:
+        key = str(task_key).strip()
+        if not key:
+            return None
+        row = self._connection.execute(
+            "SELECT * FROM competition_writeups WHERE task_key = ?", (key,)
+        ).fetchone()
+        return self._competition_writeup_row(row) if row is not None else None
+
+    @synchronized
+    def save_competition_writeup(
+        self,
+        task_key: str,
+        markdown: str,
+        status: str,
+        template_version: str,
+        validation: dict[str, Any],
+    ) -> dict[str, Any]:
+        key = str(task_key).strip()
+        markdown = str(markdown).strip()
+        if not key:
+            raise ValueError("competition writeup task_key cannot be empty")
+        if not markdown:
+            raise ValueError("competition writeup markdown cannot be empty")
+        status = str(status).strip() or "incomplete"
+        template_version = str(template_version).strip() or "1"
+        timestamp = now()
+        existing = self._connection.execute(
+            "SELECT id, created_at FROM competition_writeups WHERE task_key = ?", (key,)
+        ).fetchone()
+        if existing is None:
+            writeup_id = new_id("competition-writeup")
+            self._connection.execute(
+                """INSERT INTO competition_writeups
+                (id, task_key, markdown, status, template_version, validation_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (writeup_id, key, markdown, status, template_version, stable_json(validation), timestamp, timestamp),
+            )
+        else:
+            writeup_id = str(existing["id"])
+            self._connection.execute(
+                """UPDATE competition_writeups SET markdown = ?, status = ?, template_version = ?,
+                validation_json = ?, updated_at = ? WHERE task_key = ?""",
+                (markdown, status, template_version, stable_json(validation), timestamp, key),
+            )
+        return self._competition_writeup_row(
+            self._connection.execute("SELECT * FROM competition_writeups WHERE task_key = ?", (key,)).fetchone()
+        )
 
     @synchronized
     def reopen_project(self, project_id: str, description: str, creator: str) -> dict[str, Any]:
@@ -3543,6 +3670,7 @@ class Blackboard:
             "project": asdict(self.get_project(project_id)),
             "active_completion": self.get_active_completion(project_id),
             "completion_history": self.list_project_completions(project_id),
+            "writeup": self.get_project_writeup(project_id),
             "facts": [asdict(item) for item in self.list_facts(project_id)],
             "hints": [asdict(item) for item in self.list_hints(project_id)],
             "intents": [asdict(item) for item in self.list_intents(project_id)],
@@ -3561,6 +3689,44 @@ class Blackboard:
             "active": bool(row["active"]),
             "created_at": row["created_at"],
             "revoked_at": row["revoked_at"],
+        }
+
+    @staticmethod
+    def _writeup_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        try:
+            validation = json.loads(row["validation_json"])
+        except (TypeError, json.JSONDecodeError):
+            validation = {}
+        return {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "markdown": row["markdown"],
+            "status": row["status"],
+            "template_version": row["template_version"],
+            "validation": validation,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    @staticmethod
+    def _competition_writeup_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        try:
+            validation = json.loads(row["validation_json"])
+        except (TypeError, json.JSONDecodeError):
+            validation = {}
+        return {
+            "id": row["id"],
+            "task_key": row["task_key"],
+            "markdown": row["markdown"],
+            "status": row["status"],
+            "template_version": row["template_version"],
+            "validation": validation,
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
         }
 
     @synchronized

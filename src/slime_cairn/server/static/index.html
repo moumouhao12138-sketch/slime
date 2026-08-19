@@ -227,6 +227,13 @@
     .result-overview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .result-overview-title { margin: 0; font-size: 15px; font-weight: 800; }
     .result-overview-text { margin: 0; color: #2c4146; font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+    .writeup-panel { display: grid; gap: 12px; }
+    .writeup-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .writeup-header h2 { margin: 0; font-size: 15px; }
+    .writeup-meta { color: var(--muted); font-size: 12px; }
+    .writeup-preview { margin: 0; max-height: 420px; overflow: auto; padding: 13px; border: 1px solid var(--line); border-radius: 5px; background: #f8fbfb; color: #26383c; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .writeup-editor { width: 100%; min-height: 360px; resize: vertical; padding: 12px; border: 1px solid var(--line-strong); border-radius: 5px; background: #fff; color: var(--ink); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .writeup-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     .final-answer-label { margin: 2px 0 5px; color: var(--rose); font-size: 11px; font-weight: 800; text-transform: uppercase; }
     .final-answer-text { margin: 0; padding: 12px 14px; border: 1px solid #ead0d7; border-radius: 5px; background: #fff8fa; color: #202a2d; font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; user-select: text; }
     .result-metrics { display: flex; flex-wrap: wrap; gap: 16px; padding-top: 10px; border-top: 1px solid #e5ecee; color: var(--muted); font-size: 11px; }
@@ -676,6 +683,8 @@
         benchmarkRenderKey: "",
         benchmarkError: "",
         benchmarkActionError: "",
+        writeupEditing: false,
+        writeupDraft: "",
       };
 
       const byId = (id) => document.getElementById(id);
@@ -750,7 +759,7 @@
       }
 
       function statusLabel(status) {
-        const labels = { running: "运行", stopped: "停止", completed: "完成", pending: "等待", failed: "失败", dormant: "休眠", retry_wait: "等待重试", active: "运行" };
+        const labels = { running: "运行", stopped: "停止", completed: "完成", pending: "等待", failed: "失败", dormant: "休眠", retry_wait: "等待重试", active: "运行", ready: "可提交", incomplete: "待补充" };
         return labels[status] || String(status || "未知");
       }
 
@@ -983,6 +992,8 @@
         state.selectedProjectId = projectId;
         state.selectedNodeId = "";
         state.viewMode = "results";
+        state.writeupEditing = false;
+        state.writeupDraft = "";
         state.events = [];
         state.eventCursor = 0;
         await refresh(true);
@@ -1034,7 +1045,11 @@
           const chip = element("span");
           setStatusChip(chip, project.status);
           first.append(chip);
-          item.append(first, element("div", "project-item-target", project.target));
+          const targetLine = element("div", "project-item-target", project.target);
+          if (project.writeup_status) {
+            targetLine.append(document.createTextNode(` · WP ${project.writeup_status === "ready" ? "可提交" : "待补充"}`));
+          }
+          item.append(first, targetLine);
           entry.append(checkbox, item);
           projectList.append(entry);
         }
@@ -1191,6 +1206,8 @@
         overview.append(metrics);
         readableContent.append(overview);
 
+        renderWriteup(view);
+
         const keyFacts = readable.key_facts || [];
         if (keyFacts.length) {
           const section = element("section", "readable-section");
@@ -1239,6 +1256,113 @@
           section.append(group);
           readableContent.append(section);
         }
+      }
+
+      function renderWriteup(view) {
+        const section = element("section", "readable-section writeup-panel");
+        const heading = element("div", "writeup-header");
+        const title = element("h2", "", "团队 Writeup");
+        const chip = element("span");
+        const writeup = view.team_writeup;
+        const workerStatus = writeup?.validation?.worker_status || writeup?.status || "pending";
+        setStatusChip(chip, workerStatus);
+        heading.append(title, chip);
+        section.append(heading);
+        if (!writeup) {
+          section.append(element("p", "writeup-meta", "完成题目后会自动合并到同一个团队 Markdown 文件；尚未生成。"));
+        } else {
+          const validation = writeup.validation || {};
+          const missing = validation.missing_sections || [];
+          const challengeCount = validation.challenge_count || 0;
+          let meta = missing.length ? `共 ${challengeCount} 道题 · 仍需补充：${missing.join("、")}` : `共 ${challengeCount} 道题 · 结构校验通过，可继续人工完善。`;
+          if (workerStatus === "pending") meta = `共 ${challengeCount} 道题 · Writeup Worker 正在排队`;
+          if (workerStatus === "running") meta = `共 ${challengeCount} 道题 · Writeup Worker 正在整理中文解题报告`;
+          if (workerStatus === "failed") meta = `共 ${challengeCount} 道题 · AI 生成失败，已保留原稿：${validation.error || "未知错误"}`;
+          section.append(element("p", "writeup-meta", meta));
+          if (state.writeupEditing) {
+            const editor = element("textarea", "writeup-editor");
+            editor.value = state.writeupDraft || writeup.markdown || "";
+            editor.addEventListener("input", () => { state.writeupDraft = editor.value; });
+            section.append(editor);
+            const save = element("button", "button primary", "保存 Writeup");
+            save.type = "button";
+            save.addEventListener("click", () => saveWriteup(editor));
+            const cancel = element("button", "button", "取消编辑");
+            cancel.type = "button";
+            cancel.addEventListener("click", () => {
+              state.writeupEditing = false;
+              state.writeupDraft = "";
+              render();
+            });
+            const actions = element("div", "writeup-actions");
+            actions.append(save, cancel);
+            section.append(actions);
+          } else {
+            section.append(element("pre", "writeup-preview", writeup.markdown || ""));
+            const generate = element("button", "button", "重新生成");
+            generate.type = "button";
+            generate.disabled = ["pending", "running"].includes(workerStatus);
+            generate.addEventListener("click", generateWriteup);
+            const edit = element("button", "button", "编辑");
+            edit.type = "button";
+            edit.addEventListener("click", () => {
+              state.writeupEditing = true;
+              state.writeupDraft = writeup.markdown || "";
+              render();
+            });
+            const download = element("button", "button primary", "下载 Markdown");
+            download.type = "button";
+            download.addEventListener("click", downloadWriteup);
+            const actions = element("div", "writeup-actions");
+            actions.append(generate, edit, download);
+            section.append(actions);
+          }
+        }
+        if (!state.writeupEditing && !writeup) {
+          const generate = element("button", "button primary", "生成 Writeup");
+          generate.type = "button";
+          generate.addEventListener("click", generateWriteup);
+          const actions = element("div", "writeup-actions");
+          actions.append(generate);
+          section.append(actions);
+        }
+        readableContent.append(section);
+      }
+
+      async function generateWriteup() {
+        const project = currentProject();
+        if (!project) return;
+        try {
+          await request(`/projects/${encodeURIComponent(project.id)}/writeup/generate`, { method: "POST", body: JSON.stringify({}) });
+          state.writeupEditing = false;
+          state.writeupDraft = "";
+          showToast("Writeup Worker 已开始生成");
+          await refresh(false);
+        } catch (error) {
+          showToast(`生成 Writeup 失败: ${error.message}`, true);
+        }
+      }
+
+      async function saveWriteup(editor) {
+        const project = currentProject();
+        if (!project || !editor.value.trim()) return;
+        try {
+          await request(`/projects/${encodeURIComponent(project.id)}/writeup`, {
+            method: "PUT",
+            body: JSON.stringify({ markdown: editor.value }),
+          });
+          state.writeupEditing = false;
+          state.writeupDraft = "";
+          showToast("Writeup 已保存");
+          await refresh(false);
+        } catch (error) {
+          showToast(`保存 Writeup 失败: ${error.message}`, true);
+        }
+      }
+
+      function downloadWriteup() {
+        const project = currentProject();
+        if (project) window.location.href = `/projects/${encodeURIComponent(project.id)}/writeup/download`;
       }
 
       function applyViewMode() {
