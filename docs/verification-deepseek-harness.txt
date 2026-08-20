@@ -1,0 +1,239 @@
+DeepSeek Harness Worker installation verification
+Date: 2026-08-19 UTC
+
+Scope
+  Add @deepseek-ai/dsh@0.1.0-rc.7 to the native-agent Worker image build,
+  expose dsh in tools.json generation, and add DeepSeek Harness as the fourth
+  native Worker adapter. The adapter uses DeepSeek Chat Completions, task-local
+  DSH_HOME storage, file-backed prompts, and
+  resume_policy=same_task_conclude_only.  A timed-out execute pass is followed
+  by a bounded conclude pass that resumes the same task-local JSONL session.
+  Original tracked files remain recoverable from git HEAD; their SHA-256 values
+  were captured before editing:
+  .env.example 52f3410457201f1bb23b32c0496f5a0ed95e2936a893ea67223cff8aa26abb7d
+  compose.yaml 88ceb2e220932bfac3dd5531102954ce84740a5fca767a22ea169b832a30303a
+  docs/CONFIGURATION.md fa0125c80e058881fa8651d9da542d6f626fb205156fd73dea8ea9138c54df5f
+  docs/DEPLOYMENT.md 2b3532aa38dc56795bcfe32cdb21a21833c1b8e3d618a8d7d34d1c4580077656
+  tests/test_worker_tool_manifest.py 5753867eb060c968d1bdf357eb6141c86da2ed60574494a6056efe67cd9597f4
+  worker/Dockerfile 61d1459cd3663c6f6a4c5328b2a98bca575f7271f53f918729d02a0f9bc76e2d
+  worker/Dockerfile.ctf-assets 5101de3d7ada3807d284cab1be8763a425091800dba750770e90b93ce40899fe
+  worker/scripts/build_tool_manifest.py 1458558660477c7f9de2c7a8856d6e52c1bf9800674868d8b26520f2aefb4e42
+  dispatch.json cbb1647638c6665c7221331056c6957b98a18fd07c5c61f9cef930a41072a971
+  src/slime_cairn/dispatcher/loop.py d29ac62ab52a670f8b458bfb5c7b993ce69fae6e74bb9c49865cb640a6adcfd5
+  src/slime_cairn/workers/model_gateway.py 25d9f90b932ad06ef3a30eb9935aea84b122a7622566c1664f0c85b7741d9ccb
+  src/slime_cairn/workers/native.py a9cdcb4f51d4b421429c77e18d1f39fc30d27e575326379968c34d0680109b82
+  tests/test_agent_match_integration.py 0708d700b10b8f11876dd24878f7573db393c0ca65b20efdba0965cabdaa8e0d
+  tests/test_native_config.py 84eac59152a37399704c60ff24967b1f57746a85dbbe02278c18bbd96e156e65
+  tests/test_native_session_recovery.py 6bafbfb3ceb7e2b5cc54fb8dd298c4f0fafb06da5f4a07971b3cadecc92ca05c
+
+Baseline command
+  git show HEAD:worker/scripts/build_tool_manifest.py | rg 'dsh'
+
+Baseline literal result
+  exit status: 1 (no dsh definition)
+
+Adapter baseline command
+  git show HEAD:src/slime_cairn/dispatcher/loop.py | rg 'deepseek-harness'
+
+Adapter baseline literal result
+  exit status: 1 (no DeepSeek Harness Worker type)
+
+Patch/diff command
+  git diff --check -- .env.example compose.yaml docs/CONFIGURATION.md \
+    docs/DEPLOYMENT.md tests/test_worker_tool_manifest.py \
+  worker/Dockerfile worker/scripts/build_tool_manifest.py
+
+Patch artifacts
+  docs/deepseek-harness-worker.patch
+  docs/deepseek-harness-adapter.patch
+  docs/deepseek-harness-ctf-worker.patch
+
+Patch/diff literal result
+  no output
+  exit status: 0
+
+Adapter and session test command
+  PYTHONPATH=src python3 -m unittest -v \
+    tests.test_native_config tests.test_native_session_recovery
+
+Adapter and session test literal result
+  Ran 24 tests in 0.040s
+  OK
+  exit status: 0
+
+Gateway integration test command
+  docker run --rm -e PYTHONPATH=/app/src \
+    -v ${REPO_ROOT}:/app -w /app slime-local:0.0.37 \
+    python -m unittest -v tests.test_agent_match_integration
+
+Gateway integration test literal result
+  Ran 7 tests in 13.676s
+  OK
+  exit status: 0
+
+Modified source test command
+  python3 -m unittest -v tests.test_worker_tool_manifest
+
+Modified source test literal result
+  test_deepseek_harness_is_in_agent_inventory ... ok
+  test_version_probe_does_not_write_to_runtime_home ... ok
+  Ran 2 tests in 0.005s
+  OK
+  exit status: 0
+
+Compose validation command
+  docker compose config --quiet
+
+Compose validation literal result
+  no output
+  exit status: 0
+
+Worker verification image
+  slime-worker:dsh-verify
+  Built from slime-worker:0.0.37-ctf with the same DSH install layer:
+  @deepseek-ai/dsh@0.1.0-rc.7
+
+Worker runtime command
+  docker run --rm --user kali --entrypoint sh slime-worker:dsh-verify -lc \
+    'set -eu; printf "uid="; id -u; dsh --version; \
+    dsh --profile headless --help | sed -n "1,12p"; \
+    command -v dsh; test ! -e /home/kali/.npm; test ! -e /root/.npm'
+
+Worker runtime literal result
+  uid=1000
+  0.1.0-rc.7
+  Usage: dsh --profile headless [options] [task...]
+  Answer one task, print the final assistant message, and exit.
+  /usr/local/bin/dsh
+  exit status: 0
+
+Profile composition command
+  docker run --rm --user kali --entrypoint sh slime-worker:dsh-verify -lc \
+    'DSH_HOME=/tmp/dsh-runtime/.dsh dsh --profile headless --dump-config'
+
+Profile composition literal result
+  output begins with the @deepseek-ai/dsh-base and @deepseek-ai/dsh-headless
+  plugin layers
+  exit status: 0
+
+Tool manifest command
+  docker run --rm --user kali --entrypoint sh \
+    -v ${REPO_ROOT}/worker/scripts/build_tool_manifest.py:/tmp/build_tool_manifest.py:ro \
+    slime-worker:dsh-verify -lc \
+    'python3 /tmp/build_tool_manifest.py /tmp/dsh-tools.json; \
+     jq -c "[.[] | select(.name == \\"dsh\\")]" /tmp/dsh-tools.json'
+
+Tool manifest literal result
+  [{"name":"dsh","path":"/usr/local/bin/dsh","version":"0.1.0-rc.7",
+    "category":"agent","interactive":true,"required_capabilities":[],
+    "available":true}]
+  exit status: 0
+
+Headless initialization command
+  docker run --rm --user kali --entrypoint sh slime-worker:dsh-verify -lc \
+    'DSH_HOME=/tmp/dsh-home dsh --profile headless "reply with exactly OK"'
+
+Headless initialization literal result
+  dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route "deepseek-official"
+  exit status: 1
+  This confirms the CLI reaches provider resolution; an API key is required for
+  a model turn.
+
+Pre-session-recovery adapter argv baseline
+  image: slime-worker:0.0.37-dsh (historical pre-session-recovery check)
+  user: kali
+  model: deepseek-v4-flash
+  adapter=native-deepseek-harness
+  resume_policy=none
+  resume_allowed=false
+  argv_max_item=241
+  prompt_in_argv=false
+  exit_status=1
+  dsh: TRANSPORT: DeepSeek API request to http://127.0.0.1:9 failed
+
+  The unreachable local endpoint is intentional. It proves the generated
+  task-local patch and file prompt passed profile composition and reached the
+  DeepSeek model transport without sending a real credential.
+
+Full project Worker build attempt
+  docker build --progress=plain -t slime-worker:0.0.37-dsh \
+    --build-arg DEEPSEEK_HARNESS_VERSION=0.1.0-rc.7 worker
+
+Full project Worker build literal result
+  exit status: 100
+  E: Failed to fetch ... mirrors.tuna.tsinghua.edu.cn ... 403 Forbidden
+  E: Aborting install.
+  The failure is in the existing apt mirror path before the DSH layer; the
+  running project image was left unchanged.
+
+Current configured CTF Worker rebuild command
+  SLIME_WORKER_BASE_IMAGE=slime-worker:0.0.37-dsh \
+    docker compose --progress plain build worker-image
+
+Current configured CTF Worker rebuild literal result
+  slime-worker:0.0.37-ctf Built
+  exit status: 0
+  image id: sha256:6181a3a6cdc326e54eab524bff5181301938a441d5635433941d4ba0a3c8fd20
+
+Rebuilt image verification command
+  docker run --rm --user kali --entrypoint sh slime-worker:0.0.37-ctf -lc \
+    'id -u; command -v dsh; dsh --version; \
+     jq -ec ".[] | select(.name == \\"dsh\\" and .available == true)" \
+       /opt/slime-cairn/tools.json'
+
+Rebuilt image verification literal result
+  1000
+  /usr/local/bin/dsh
+  0.1.0-rc.7
+  {"name":"dsh","path":"/usr/local/bin/dsh","version":"0.1.0-rc.7",
+   "category":"agent","interactive":true,"required_capabilities":[],
+   "available":true}
+  exit status: 0
+
+Rebuilt profile and CTF manifest verification
+  /opt/slime-cairn/ctf-knowledge.json type: object
+  @deepseek-ai/dsh-headless profile layer: present
+  exit status: 0
+
+Session recovery patch verification
+  PYTHONPATH=src python3 -m unittest \
+    tests.test_deepseek_harness_patch tests.test_native_session_recovery
+
+Session recovery test literal result
+  Ran 15 tests in 0.040s
+  OK
+  exit status: 0
+
+  The DSH headless source in slime-worker:0.0.37-ctf contains:
+  DSH_SESSION_ID, DSH_RESUME_SESSION_ID, agents.resume, and handle.dispose().
+  The timeout fixture records execute and conclude transcripts under one
+  task session, with resume_requested=true and recovered=true.
+
+Current Worker image build command
+  docker build --progress=plain -f worker/Dockerfile.ctf-assets \
+    --build-arg BASE_IMAGE=slime-worker:0.0.37-ctf \
+    -t slime-worker:0.0.37-ctf worker
+
+Current Worker image build literal result
+  exit status: 0
+  image id: sha256:6181a3a6cdc326e54eab524bff5181301938a441d5635433941d4ba0a3c8fd20
+
+Application reload verification
+  slime-local:0.0.37 image id:
+  sha256:56287b8e503d63b05d3d5946062820dafec0b44a70345cd33a644fa15bd5b1b0
+  docker compose up -d --no-build --force-recreate api dispatcher
+  exit status: 0
+
+Application service literal result
+  API: {"ok":true,"version":"0.0.37"}
+  Dispatcher: worker_health worker=deepseek-harness-native healthy=True status=200
+  DSH Worker source reports resume_policy=same_task_conclude_only and
+  conclude_session_strategy=same_task_session.
+  The previously active pwn fixture was left stopped after service recovery;
+  no project Worker remains running after verification.
+
+Rollback rehearsal
+  In a detached temporary worktree at HEAD, the three patch artifacts were
+  applied forward, the 3 patch tests and 12 native session tests returned OK,
+  then all three patches were applied in reverse.
+  Literal result: rollback_worktree_clean=true

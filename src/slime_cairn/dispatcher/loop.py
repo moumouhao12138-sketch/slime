@@ -35,6 +35,9 @@ WORKER_TYPE_ALIASES = {
     "claude-code": "claude-code",
     "codex": "codex-cli",
     "codex-cli": "codex-cli",
+    "deepseek": "deepseek-harness",
+    "deepseek-harness": "deepseek-harness",
+    "dsh": "deepseek-harness",
     "pi": "pi-cli",
     "pi-cli": "pi-cli",
 }
@@ -280,6 +283,29 @@ def _explicit_model_endpoint(
         validate_competition_model_route(worker_type, endpoint.base_url, endpoint.protocol, os.environ)
         environment["ANTHROPIC_BASE_URL"] = endpoint.client_base_url()
         return model, "", endpoint, {}
+
+    if worker_type == "deepseek-harness":
+        model = required("DSH_MODEL")
+        complete_gateway_endpoint = competition_gateway_full_endpoint(
+            worker_type,
+            required("DEEPSEEK_BASE_URL"),
+            "openai-chat-completions",
+            os.environ,
+        )
+        endpoint = ModelEndpoint(
+            base_url=required("DEEPSEEK_BASE_URL"),
+            api_key=required("DEEPSEEK_API_KEY"),
+            protocol="openai-chat-completions",
+            complete_gateway_endpoint=complete_gateway_endpoint,
+        )
+        validate_competition_model_route(
+            worker_type,
+            endpoint.base_url,
+            endpoint.protocol,
+            os.environ,
+        )
+        environment["DEEPSEEK_BASE_URL"] = endpoint.client_base_url()
+        return model, "deepseek-official", endpoint, {}
 
     model = required("PI_MODEL")
     provider_api = required("PI_PROVIDER_API")
@@ -770,7 +796,9 @@ def load_dispatch_config(
         try:
             worker_type = WORKER_TYPE_ALIASES[declared_type]
         except KeyError as exc:
-            raise ValueError("native-agent supports claudecode, codex, or pi") from exc
+            raise ValueError(
+                "native-agent supports claudecode, codex, deepseek-harness, or pi"
+            ) from exc
         execution = str(entry.get("execution", "native-agent")).strip().lower()
         environment = {
             str(key): str(value)
@@ -795,6 +823,7 @@ def load_dispatch_config(
         default_binary = {
             "claude-code": "claude",
             "codex-cli": "codex",
+            "deepseek-harness": "dsh",
             "pi-cli": "pi",
         }[worker_type]
         model, provider, endpoint, endpoint_overrides = _explicit_model_endpoint(

@@ -8,6 +8,7 @@ ARG INSTALL_REFERENCE_ASSETS=true
 ARG CODEX_VERSION=0.144.6
 ARG CLAUDE_CODE_VERSION=2.1.112
 ARG PI_AGENT_VERSION=0.73.1
+ARG DEEPSEEK_HARNESS_VERSION=0.1.0-rc.7
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -40,16 +41,24 @@ RUN groupadd --gid 1000 kali \
     && chmod 0440 /etc/sudoers.d/kali
 
 COPY scripts/fetch_reference_asset.sh /usr/local/bin/fetch_reference_asset
+COPY scripts/patch_deepseek_harness.py /usr/local/bin/patch_deepseek_harness.py
 
 RUN chmod +x /usr/local/bin/fetch_reference_asset \
     && pip3 install --break-system-packages pwntools pymongo \
     && if [ "${INSTALL_NATIVE_AGENTS}" = "true" ]; then \
-        npm install -g \
+        HOME=/root npm_config_cache=/root/.npm npm install -g \
             "@openai/codex@${CODEX_VERSION}" \
             "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-            "@mariozechner/pi-coding-agent@${PI_AGENT_VERSION}"; \
+            "@mariozechner/pi-coding-agent@${PI_AGENT_VERSION}" \
+            "@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}"; \
     fi \
-    && npm install -g @playwright/cli@latest
+    && HOME=/root npm_config_cache=/root/.npm npm install -g @playwright/cli@latest \
+    && rm -rf /home/kali/.npm /root/.npm
+
+RUN if command -v dsh >/dev/null 2>&1; then \
+        python3 /usr/local/bin/patch_deepseek_harness.py \
+            "$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek"; \
+    fi
 
 RUN mkdir -p /home/kali/.local/nuclei-templates /home/kali/knowledges /home/kali/tools /home/kali/pocs \
     && git clone --depth 1 https://github.com/projectdiscovery/nuclei-templates.git /home/kali/.local/nuclei-templates \

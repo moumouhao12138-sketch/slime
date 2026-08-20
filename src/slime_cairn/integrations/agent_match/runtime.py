@@ -624,7 +624,8 @@ class AgentMatchProjectController:
         return {
             "targets": targets,
             "origin": f"competition exercise {int(detail.get('id') or 0)}",
-            "bootstrap_enabled": False,
+            "start_mode": "hybrid",
+            "bootstrap_enabled": True,
             "hints": [],
             "submission": {
                 "managed": True,

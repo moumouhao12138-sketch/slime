@@ -21,15 +21,15 @@ curl -X POST http://127.0.0.1:8000/agent-match/exercises/1001/start
 Worker 只应配置平台控制台生成的网关 URL，例如：
 
 ```dotenv
-SLIME_CODEX_BASE_URL=https://<platform-host>/llm-gateway/proxy/e/<endpointCode>
-SLIME_CODEX_API_KEY=<MODEL_API_KEY>
-SLIME_CODEX_MODEL=<MODEL_NAME>
+SLIME_DEEPSEEK_BASE_URL=https://<platform-host>/llm-gateway/proxy/e/<endpointCode>
+SLIME_DEEPSEEK_API_KEY=<MODEL_API_KEY>
+SLIME_DEEPSEEK_MODEL=<MODEL_NAME>
 SLIME_COMPETITION_GATEWAY_ONLY=true
-SLIME_CODEX_UPSTREAM_ENDPOINT=https://api.deepseek.com/responses
+SLIME_DEEPSEEK_UPSTREAM_ENDPOINT=https://api.deepseek.com/chat/completions
 ```
 
-`SLIME_CODEX_UPSTREAM_ENDPOINT` 是在赛事控制台登记并由网关转发的完整上游 URL，
-不是 Worker 实际连接地址。实际连接地址始终是 `SLIME_CODEX_BASE_URL`。不得把平台
+`SLIME_DEEPSEEK_UPSTREAM_ENDPOINT` 是在赛事控制台登记并由网关转发的完整上游 URL，
+不是 Worker 实际连接地址。实际连接地址始终是 `SLIME_DEEPSEEK_BASE_URL`。不得把平台
 AccessKey 填到任何 `*_API_KEY` 变量中。
 
 ### 协议选择
@@ -37,11 +37,12 @@ AccessKey 填到任何 `*_API_KEY` 变量中。
 | Worker | 实际请求路径 | 可使用的白名单 URL 类型 |
 | --- | --- | --- |
 | Codex | `/responses` | 以 `/responses` 结尾的 URL |
+| DeepSeek Harness | `/chat/completions` | 以 `/chat/completions` 结尾的 URL |
 | Pi（`openai-responses`） | `/responses` | 以 `/responses` 结尾的 URL |
 | Pi（Chat Completions） | `/chat/completions` | 以 `/chat/completions` 结尾的 URL |
 | Claude | `/v1/messages` | 以 `/v1/messages` 结尾的 URL |
 
-默认 Codex Worker 必须选择以下完整端点之一：
+启用 Codex Worker 时，必须选择以下完整端点之一：
 
 ```text
 https://api.deepseek.com/responses

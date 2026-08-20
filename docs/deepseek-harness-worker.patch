@@ -1,0 +1,320 @@
+diff --git a/.env.example b/.env.example
+index dde2c73..9ef9809 100644
+--- a/.env.example
++++ b/.env.example
+@@ -1,4 +1,4 @@
+-# Model provider used by the default Codex Worker.
++# Shared gateway settings used by DeepSeek Harness and the optional Codex Worker.
+ SLIME_CODEX_BASE_URL=https://api.example.com/v1
+ SLIME_CODEX_API_KEY=replace-with-api-key
+ SLIME_CODEX_MODEL=replace-with-model-name
+@@ -32,6 +32,11 @@ SLIME_CLAUDE_BASE_URL=
+ SLIME_CLAUDE_API_KEY=
+ SLIME_CLAUDE_MODEL=
+
++# DeepSeek Harness native Worker. Empty values reuse the Codex settings above.
++SLIME_DEEPSEEK_BASE_URL=
++SLIME_DEEPSEEK_API_KEY=
++SLIME_DEEPSEEK_MODEL=
++
+ # Compose deployment. Published images are used by default.
+ SLIME_APP_IMAGE=ghcr.io/moumouhao12138-sketch/slime:0.0.37
+ SLIME_WORKER_IMAGE=ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37
+@@ -50,6 +55,7 @@ SLIME_WORKER_DOCKERFILE=Dockerfile
+ SLIME_KALI_APT_MIRROR=http://http.kali.org/kali
+ SLIME_KALI_APT_VERIFY_PEER=true
+ SLIME_INSTALL_NATIVE_AGENTS=true
++SLIME_DEEPSEEK_HARNESS_VERSION=0.1.0-rc.7
+ SLIME_INSTALL_REFERENCE_ASSETS=true
+ SLIME_INSTALL_CTF_REFERENCE_ASSETS=true
+
+@@ -75,3 +81,4 @@ SLIME_GATEWAY_FULL_ENDPOINT=false
+ SLIME_CODEX_UPSTREAM_ENDPOINT=
+ SLIME_PI_UPSTREAM_ENDPOINT=
+ SLIME_CLAUDE_UPSTREAM_ENDPOINT=
++SLIME_DEEPSEEK_UPSTREAM_ENDPOINT=
+diff --git a/compose.yaml b/compose.yaml
+index 53893d3..763e08a 100644
+--- a/compose.yaml
++++ b/compose.yaml
+@@ -81,6 +81,7 @@ services:
+         KALI_APT_MIRROR: ${SLIME_KALI_APT_MIRROR:-http://http.kali.org/kali}
+         KALI_APT_VERIFY_PEER: ${SLIME_KALI_APT_VERIFY_PEER:-true}
+         INSTALL_NATIVE_AGENTS: ${SLIME_INSTALL_NATIVE_AGENTS:-true}
++        DEEPSEEK_HARNESS_VERSION: ${SLIME_DEEPSEEK_HARNESS_VERSION:-0.1.0-rc.7}
+         INSTALL_REFERENCE_ASSETS: ${SLIME_INSTALL_REFERENCE_ASSETS:-true}
+         INSTALL_CTF_REFERENCE_ASSETS: ${SLIME_INSTALL_CTF_REFERENCE_ASSETS:-true}
+     command:
+diff --git a/docs/CONFIGURATION.md b/docs/CONFIGURATION.md
+index b88a5ac..a1dcf68 100644
+--- a/docs/CONFIGURATION.md
++++ b/docs/CONFIGURATION.md
+@@ -53,9 +53,9 @@ SLIME_LLM_MODEL=
+
+ 未解析到非空值时，Dispatcher 会拒绝启动对应 Worker。
+
+-### 1.3 Pi 与 Claude
++### 1.3 Pi、Claude 与 DeepSeek Harness
+
+-Pi 和 Claude 默认关闭。启用前先填写专用配置，再将 `dispatch.json` 中相应 Worker 的 `enabled` 改为 `true`。
++Pi 和 Claude 默认关闭。DeepSeek Harness 默认启用；其专用配置留空时会复用 `SLIME_CODEX_*`，需要独立网关或模型时再填写 `SLIME_DEEPSEEK_*`。
+
+ ```dotenv
+ SLIME_PI_BASE_URL=
+@@ -65,9 +65,13 @@ SLIME_PI_MODEL=
+ SLIME_CLAUDE_BASE_URL=
+ SLIME_CLAUDE_API_KEY=
+ SLIME_CLAUDE_MODEL=
++
++SLIME_DEEPSEEK_BASE_URL=
++SLIME_DEEPSEEK_API_KEY=
++SLIME_DEEPSEEK_MODEL=
+ ```
+
+-Pi 使用 OpenAI Chat Completions 兼容接口。Claude 使用 `ANTHROPIC_*` 环境变量，并将项目级配置目录放在 `/workspace/shared/agent-homes/claude`。
++Pi 使用配置的 OpenAI 兼容接口。Claude 使用 `ANTHROPIC_*` 环境变量，并将项目级配置目录放在 `/workspace/shared/agent-homes/claude`。DeepSeek Harness 使用原生 DeepSeek Chat Completions 协议；每个任务创建独立的 `DSH_HOME`，并在超时后的 conclude 阶段通过持久化 JSONL 会话恢复同一任务上下文。默认 Worker 配置将 `DSH_REASONING_EFFORT` 设为 `max`。
+
+ ### 1.4 Compose 部署
+
+@@ -95,6 +99,7 @@ Pi 使用 OpenAI Chat Completions 兼容接口。Claude 使用 `ANTHROPIC_*` 环
+ | `SLIME_KALI_APT_MIRROR` | `http://http.kali.org/kali` |
+ | `SLIME_KALI_APT_VERIFY_PEER` | `true` |
+ | `SLIME_INSTALL_NATIVE_AGENTS` | `true` |
++| `SLIME_DEEPSEEK_HARNESS_VERSION` | `0.1.0-rc.7` |
+ | `SLIME_INSTALL_REFERENCE_ASSETS` | `true` |
+
+ ### 1.6 可选 Benchmark 集成
+@@ -299,9 +304,10 @@ Worker 的其他固定运行属性：
+
+ | 名称 | 类型 | 默认状态 | 任务类型 | `max_running` |
+ |---|---|---|---|---:|
+-| `codex-native` | Codex | 启用 | bootstrap/explore/reason | `8` |
++| `codex-native` | Codex | 关闭 | bootstrap/explore/reason | `8` |
+ | `pi-native` | Pi | 关闭 | bootstrap/explore/reason | `4` |
+ | `claude-native` | Claude Code | 关闭 | bootstrap/explore/reason | `2` |
++| `deepseek-harness-native` | DeepSeek Harness | 启用 | bootstrap/explore/reason | `8` |
+
+ Worker 条目示例：
+
+diff --git a/docs/DEPLOYMENT.md b/docs/DEPLOYMENT.md
+index 00b0ab0..4f83bf2 100644
+--- a/docs/DEPLOYMENT.md
++++ b/docs/DEPLOYMENT.md
+@@ -135,7 +135,8 @@ Health   http://127.0.0.1:8000/health
+ | `SLIME_DOCKER_CLI_IMAGE` | `docker:29-cli` | 注入应用镜像的 Docker CLI |
+ | `SLIME_WORKER_BASE_IMAGE` | `kalilinux/kali-rolling` | Worker 基础镜像 |
+ | `SLIME_KALI_APT_MIRROR` | Kali 官方镜像 | Worker 软件源 |
+-| `SLIME_INSTALL_NATIVE_AGENTS` | `true` | 安装 Codex、Claude、Pi CLI |
++| `SLIME_INSTALL_NATIVE_AGENTS` | `true` | 安装 Codex、Claude、Pi 和 DeepSeek Harness CLI |
++| `SLIME_DEEPSEEK_HARNESS_VERSION` | `0.1.0-rc.7` | DeepSeek Harness CLI 版本 |
+ | `SLIME_INSTALL_REFERENCE_ASSETS` | `true` | 构建时下载 Cairn 的 PoC、工具和知识库 |
+
+ Worker 镜像体积较大，首次构建需要较长时间和稳定网络。
+diff --git a/tests/test_worker_tool_manifest.py b/tests/test_worker_tool_manifest.py
+index 433e390..cadd9c1 100644
+--- a/tests/test_worker_tool_manifest.py
++++ b/tests/test_worker_tool_manifest.py
+@@ -20,6 +20,11 @@ def load_manifest_module():
+
+
+ class WorkerToolManifestTests(unittest.TestCase):
++    def test_deepseek_harness_is_in_agent_inventory(self):
++        module = load_manifest_module()
++
++        self.assertIn(("dsh", "agent", True, []), module.DEFINITIONS)
++
+     def test_version_probe_does_not_write_to_runtime_home(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+diff --git a/worker/Dockerfile b/worker/Dockerfile
+index 5c2a9d6..17d6ec1 100644
+--- a/worker/Dockerfile
++++ b/worker/Dockerfile
+@@ -8,6 +8,7 @@ ARG INSTALL_REFERENCE_ASSETS=true
+ ARG CODEX_VERSION=0.144.6
+ ARG CLAUDE_CODE_VERSION=2.1.112
+ ARG PI_AGENT_VERSION=0.73.1
++ARG DEEPSEEK_HARNESS_VERSION=0.1.0-rc.7
+
+ ENV DEBIAN_FRONTEND=noninteractive \
+     PYTHONUNBUFFERED=1 \
+@@ -40,16 +41,24 @@ RUN groupadd --gid 1000 kali \
+     && chmod 0440 /etc/sudoers.d/kali
+
+ COPY scripts/fetch_reference_asset.sh /usr/local/bin/fetch_reference_asset
++COPY scripts/patch_deepseek_harness.py /usr/local/bin/patch_deepseek_harness.py
+
+ RUN chmod +x /usr/local/bin/fetch_reference_asset \
+     && pip3 install --break-system-packages pwntools pymongo \
+     && if [ "${INSTALL_NATIVE_AGENTS}" = "true" ]; then \
+-        npm install -g \
++        HOME=/root npm_config_cache=/root/.npm npm install -g \
+             "@openai/codex@${CODEX_VERSION}" \
+             "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+-            "@mariozechner/pi-coding-agent@${PI_AGENT_VERSION}"; \
++            "@mariozechner/pi-coding-agent@${PI_AGENT_VERSION}" \
++            "@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}"; \
+     fi \
+-    && npm install -g @playwright/cli@latest
++    && HOME=/root npm_config_cache=/root/.npm npm install -g @playwright/cli@latest \
++    && rm -rf /home/kali/.npm /root/.npm
++
++RUN if command -v dsh >/dev/null 2>&1; then \
++        python3 /usr/local/bin/patch_deepseek_harness.py \
++            "$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek"; \
++    fi
+
+ RUN mkdir -p /home/kali/.local/nuclei-templates /home/kali/knowledges /home/kali/tools /home/kali/pocs \
+     && git clone --depth 1 https://github.com/projectdiscovery/nuclei-templates.git /home/kali/.local/nuclei-templates \
+diff --git a/worker/scripts/build_tool_manifest.py b/worker/scripts/build_tool_manifest.py
+index 2e22785..70e7025 100644
+--- a/worker/scripts/build_tool_manifest.py
++++ b/worker/scripts/build_tool_manifest.py
+@@ -56,6 +56,7 @@ DEFINITIONS = [
+     ("codex", "agent", True, []),
+     ("claude", "agent", True, []),
+     ("pi", "agent", True, []),
++    ("dsh", "agent", True, []),
+ ]
+
+
+@@ -71,6 +72,7 @@ def version_of(path: str) -> str:
+                 "CODEX_HOME": str(Path(probe_home) / ".codex"),
+                 "CLAUDE_CONFIG_DIR": str(Path(probe_home) / ".claude"),
+                 "PI_CODING_AGENT_DIR": str(Path(probe_home) / ".pi"),
++                "DSH_HOME": str(Path(probe_home) / ".dsh"),
+             }
+         )
+         for args in ([path, "--version"], [path, "-V"]):
+diff --git a/worker/scripts/patch_deepseek_harness.py b/worker/scripts/patch_deepseek_harness.py
+new file mode 100644
+index 0000000..a00c89b
+--- /dev/null
++++ b/worker/scripts/patch_deepseek_harness.py
+@@ -0,0 +1,126 @@
++#!/usr/bin/env python3
++"""Patch DSH's DeepSeek adapter and headless runner for Slime's task contract.
++
++Some OpenAI-compatible gateways emit ``id: null`` and ``name: null`` on
++continuation deltas.  dsh 0.1.0-rc.7 used those values to overwrite metadata
++captured from the first delta, producing empty tool-call identifiers in the
++next request.  Preserve only non-empty strings so the completed call remains
++valid for the gateway's message schema.
++
++The stock headless runner also creates a random session for every process.
++Slime passes a task-local session ID and needs its bounded conclude invocation
++to resume that persisted session after a timeout, so the runner is extended to
++select ``agents.resume`` when ``DSH_RESUME_SESSION_ID`` is present.
++"""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++import sys
++
++
++OLD_ID = "if (call.id !== void 0) block.callId = call.id;"
++NEW_ID = 'if (typeof call.id === "string" && call.id.length > 0) block.callId = call.id;'
++OLD_NAME = "if (call.function?.name !== void 0) block.name = call.function.name;"
++NEW_NAME = 'if (typeof call.function?.name === "string" && call.function.name.length > 0) block.name = call.function.name;'
++
++HEADLESS_OLD_RUN = """\tconst selection = defaultModel.currentSelection();
++\tconst { agent } = await agents.create({
++\t\tsessionId: SessionId(`session-${randomUUID()}`),
++\t\tmeta: { cwd: process.cwd() },
++\t\tagentOptions: {
++\t\t\tprovider: selection.provider,
++\t\t\tmodel: selection.model
++\t\t},
++\t\tsetup: (agentCtx) => {
++\t\t\tinstallModelSelection(agentCtx, {
++\t\t\t\tcurrent: selection,
++\t\t\t\tassembled: void 0
++\t\t\t});
++\t\t}
++\t});"""
++HEADLESS_NEW_RUN = """\tconst selection = defaultModel.currentSelection();
++\tconst agentOptions = {
++\t\tprovider: selection.provider,
++\t\tmodel: selection.model
++\t};
++\tconst setup = (agentCtx) => {
++\t\tinstallModelSelection(agentCtx, {
++\t\t\tcurrent: selection,
++\t\t\tassembled: void 0
++\t\t});
++\t};
++\tconst resumeSessionId = process.env.DSH_RESUME_SESSION_ID?.trim();
++\tconst configuredSessionId = process.env.DSH_SESSION_ID?.trim();
++\tconst handle = resumeSessionId
++\t\t? await agents.resume({
++\t\t\tresumeSessionId: SessionId(resumeSessionId),
++\t\t\tagentOptions,
++\t\t\tsetup
++\t\t})
++\t\t: await agents.create({
++\t\t\tsessionId: SessionId(configuredSessionId || `session-${randomUUID()}`),
++\t\t\tmeta: { cwd: process.cwd() },
++\t\t\tagentOptions,
++\t\t\tsetup
++\t\t});
++\tconst { agent } = handle;"""
++HEADLESS_OLD_SUMMARY = "\tconst outcome = summarize(agent.session.events, firstSeq);\n\tio.stdout.write(outcome.text + \"\\n\");"
++HEADLESS_NEW_SUMMARY = "\tconst outcome = summarize(agent.session.events, firstSeq);\n\tawait handle.dispose();\n\tio.stdout.write(outcome.text + \"\\n\");"
++
++
++def package_version(package_root: Path) -> str:
++    package_json = package_root / "package.json"
++    try:
++        data = json.loads(package_json.read_text(encoding="utf-8"))
++    except (OSError, json.JSONDecodeError) as exc:
++        raise SystemExit(f"DeepSeek Harness package metadata is unreadable: {package_json}") from exc
++    return str(data.get("version", "unknown"))
++
++
++def _patch_source(source: Path, old: str, new: str, label: str) -> bool:
++    try:
++        text = source.read_text(encoding="utf-8")
++    except OSError as exc:
++        raise SystemExit(f"DeepSeek Harness {label} is unreadable: {source}") from exc
++    if old not in text:
++        if new in text:
++            return False
++        raise SystemExit(f"Unexpected DeepSeek Harness {label} source: {source}")
++    if text.count(old) != 1:
++        raise SystemExit(f"DeepSeek Harness {label} patch anchor is ambiguous: {source}")
++    source.write_text(text.replace(old, new), encoding="utf-8")
++    return True
++
++
++def patch(package_root: Path) -> bool:
++    source = package_root / "lib" / "index.js"
++    changed = False
++    changed |= _patch_source(source, OLD_ID, NEW_ID, "adapter")
++    changed |= _patch_source(source, OLD_NAME, NEW_NAME, "adapter")
++
++    headless_source = package_root.parent / "dsh-headless" / "lib" / "index.js"
++    changed |= _patch_source(headless_source, HEADLESS_OLD_RUN, HEADLESS_NEW_RUN, "headless runner")
++    changed |= _patch_source(
++        headless_source,
++        HEADLESS_OLD_SUMMARY,
++        HEADLESS_NEW_SUMMARY,
++        "headless runner summary",
++    )
++    return changed
++
++
++def main() -> None:
++    if len(sys.argv) != 2:
++        raise SystemExit("usage: patch_deepseek_harness.py <dsh-llm-deepseek-package>")
++    root = Path(sys.argv[1]).resolve()
++    changed = patch(root)
++    print(
++        "deepseek-harness adapter: "
++        f"version={package_version(root)} nullable-tool-metadata={'patched' if changed else 'already-patched'}"
++    )
++
++
++if __name__ == "__main__":
++    main()

@@ -1,0 +1,829 @@
+diff --git a/dispatch.json b/dispatch.json
+index 85f2554..ce2de91 100644
+--- a/dispatch.json
++++ b/dispatch.json
+@@ -53,6 +53,7 @@
+     {
+       "name": "codex-native",
+       "type": "codex",
++      "enabled": false,
+       "execution": "native-agent",
+       "task_types": ["bootstrap", "explore", "reason"],
+       "max_running": 8,
+@@ -101,6 +102,25 @@
+       "environment": {
+         "CLAUDE_CONFIG_DIR": "/workspace/shared/agent-homes/claude"
+       }
++    },
++    {
++      "name": "deepseek-harness-native",
++      "type": "deepseek-harness",
++      "enabled": true,
++      "execution": "native-agent",
++      "task_types": ["bootstrap", "explore", "reason"],
++      "max_running": 8,
++      "priority": 0,
++      "max_report_items": 30,
++      "container_preflight": false,
++      "env": {
++        "DSH_MODEL": "${SLIME_DEEPSEEK_MODEL|SLIME_CODEX_MODEL|SLIME_LLM_MODEL}",
++        "DSH_REASONING_EFFORT": "max",
++        "DEEPSEEK_BASE_URL": "${SLIME_DEEPSEEK_BASE_URL|SLIME_CODEX_BASE_URL|SLIME_LLM_BASE_URL}",
++        "DEEPSEEK_API_KEY": "${SLIME_DEEPSEEK_API_KEY|SLIME_CODEX_API_KEY|SLIME_LLM_API_KEY}",
++        "DSH_PERMISSION_MODE": "danger-full-access",
++        "DSH_TELEMETRY_MODE": "DISABLED"
++      }
+     }
+   ]
+ }
+diff --git a/src/slime_cairn/dispatcher/loop.py b/src/slime_cairn/dispatcher/loop.py
+index ad4cfbd..231bf7d 100644
+--- a/src/slime_cairn/dispatcher/loop.py
++++ b/src/slime_cairn/dispatcher/loop.py
+@@ -35,6 +35,9 @@ WORKER_TYPE_ALIASES = {
+     "claude-code": "claude-code",
+     "codex": "codex-cli",
+     "codex-cli": "codex-cli",
++    "deepseek": "deepseek-harness",
++    "deepseek-harness": "deepseek-harness",
++    "dsh": "deepseek-harness",
+     "pi": "pi-cli",
+     "pi-cli": "pi-cli",
+ }
+@@ -281,6 +284,29 @@ def _explicit_model_endpoint(
+         environment["ANTHROPIC_BASE_URL"] = endpoint.client_base_url()
+         return model, "", endpoint, {}
+
++    if worker_type == "deepseek-harness":
++        model = required("DSH_MODEL")
++        complete_gateway_endpoint = competition_gateway_full_endpoint(
++            worker_type,
++            required("DEEPSEEK_BASE_URL"),
++            "openai-chat-completions",
++            os.environ,
++        )
++        endpoint = ModelEndpoint(
++            base_url=required("DEEPSEEK_BASE_URL"),
++            api_key=required("DEEPSEEK_API_KEY"),
++            protocol="openai-chat-completions",
++            complete_gateway_endpoint=complete_gateway_endpoint,
++        )
++        validate_competition_model_route(
++            worker_type,
++            endpoint.base_url,
++            endpoint.protocol,
++            os.environ,
++        )
++        environment["DEEPSEEK_BASE_URL"] = endpoint.client_base_url()
++        return model, "deepseek-official", endpoint, {}
++
+     model = required("PI_MODEL")
+     provider_api = required("PI_PROVIDER_API")
+     protocol = (
+@@ -770,7 +796,9 @@ def load_dispatch_config(
+         try:
+             worker_type = WORKER_TYPE_ALIASES[declared_type]
+         except KeyError as exc:
+-            raise ValueError("native-agent supports claudecode, codex, or pi") from exc
++            raise ValueError(
++                "native-agent supports claudecode, codex, deepseek-harness, or pi"
++            ) from exc
+         execution = str(entry.get("execution", "native-agent")).strip().lower()
+         environment = {
+             str(key): str(value)
+@@ -795,6 +823,7 @@ def load_dispatch_config(
+         default_binary = {
+             "claude-code": "claude",
+             "codex-cli": "codex",
++            "deepseek-harness": "dsh",
+             "pi-cli": "pi",
+         }[worker_type]
+         model, provider, endpoint, endpoint_overrides = _explicit_model_endpoint(
+diff --git a/src/slime_cairn/workers/model_gateway.py b/src/slime_cairn/workers/model_gateway.py
+index 3fa0c1e..cf4b1d5 100644
+--- a/src/slime_cairn/workers/model_gateway.py
++++ b/src/slime_cairn/workers/model_gateway.py
+@@ -69,6 +69,7 @@ _UPSTREAM_ENV_BY_WORKER = {
+     "codex-cli": "SLIME_CODEX_UPSTREAM_ENDPOINT",
+     "pi-cli": "SLIME_PI_UPSTREAM_ENDPOINT",
+     "claude-code": "SLIME_CLAUDE_UPSTREAM_ENDPOINT",
++    "deepseek-harness": "SLIME_DEEPSEEK_UPSTREAM_ENDPOINT",
+ }
+ _REQUIRED_SUFFIX_BY_PROTOCOL = {
+     "openai-responses": "/responses",
+diff --git a/src/slime_cairn/workers/native.py b/src/slime_cairn/workers/native.py
+index 14a0a6c..be3de0f 100644
+--- a/src/slime_cairn/workers/native.py
++++ b/src/slime_cairn/workers/native.py
+@@ -74,7 +74,7 @@ def _managed_submission(scope: dict[str, Any]) -> bool:
+
+
+ class NativeConcludeFallbackError(ModelInvocationError):
+-    """A failed execute pass whose same-session conclude pass also failed."""
++    """A failed execute pass whose bounded conclude pass also failed."""
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -109,7 +109,12 @@ class NativeAgentConfig:
+     container_preflight: bool = True
+
+     def __post_init__(self) -> None:
+-        if self.adapter not in {"claude-code", "codex-cli", "pi-cli"}:
++        if self.adapter not in {
++            "claude-code",
++            "codex-cli",
++            "deepseek-harness",
++            "pi-cli",
++        }:
+             raise ValueError(f"native-agent 不支持 Adapter: {self.adapter}")
+         if not self.worker_name.strip() or not self.binary.strip():
+             raise ValueError("native-agent 需要 worker_name 和 binary")
+@@ -177,6 +182,9 @@ class NativeSessionState:
+     # Sessions are task-scoped. ``resume_session`` becomes true only after the
+     # execute phase reports an ID that this task's conclude phase can resume.
+     resume_session: bool = False
++    # DSH's headless runner receives this explicit flag for its conclude
++    # invocation; it is separate from adapter-emitted session metadata.
++    resume_requested: bool = False
+     resume_allowed: bool = True
+     status: str = "active"
+     started_at: float = field(default_factory=time.time)
+@@ -220,6 +228,16 @@ class NativeAgentMind:
+     _resource_lock = threading.RLock()
+     _active_port_blocks: dict[str, dict[int, str]] = {}
+
++    @property
++    def _resume_policy(self) -> str:
++        return "same_task_conclude_only"
++
++    @property
++    def _conclude_session_strategy(self) -> str:
++        """Describe how a bounded conclude turn gets its model context."""
++
++        return "same_task_session"
++
+     def __init__(self, config: NativeAgentConfig, backend_resolver: NativeBackendResolver) -> None:
+         self.config = config
+         self.backend_resolver = backend_resolver
+@@ -397,13 +415,15 @@ class NativeAgentMind:
+                 "intent_id": state.intent_id,
+                 "mode": state.mode,
+                 "session_scope": "task",
+-                "resume_policy": "same_task_conclude_only",
++                "resume_policy": self._resume_policy,
++                "conclude_session_strategy": self._conclude_session_strategy,
+                 "session_id": state.session_id,
+                 "directory": state.directory.relative_to(state.workspace_root).as_posix(),
+                 "container_directory": state.container_directory,
+                 "turns": state.turns,
+                 "resumed": state.resumed,
+                 "resume_session": state.resume_session,
++                "resume_requested": state.resume_requested,
+                 "resume_allowed": state.resume_allowed,
+                 "status": state.status,
+                 "started_at": state.started_at,
+@@ -471,6 +491,25 @@ class NativeAgentMind:
+             return True
+         return False
+
++    def _can_run_conclude_fallback(
++        self,
++        state: NativeSessionState,
++        mode: str,
++        result: CommandExecution,
++    ) -> bool:
++        """Return whether this task may enter Cairn's bounded conclude phase.
++
++        The regular native adapters need a usable session ID emitted by their
++        CLI. The patched DSH runner uses Slime's fixed task session ID, so its
++        conclude process can request resume without adapter-emitted metadata.
++        """
++
++        if mode not in {"bootstrap", "explore"}:
++            return False
++        if self.config.adapter == "deepseek-harness":
++            return True
++        return state.resume_session and not self._failed_execute_session_unusable(result)
++
+     def begin_session(self, task: WorkerTask, intent: Intent) -> dict[str, Any]:
+         backend = self.backend_resolver(intent.project_id)
+         workspace_root = backend.workspace_root.resolve()
+@@ -485,6 +524,8 @@ class NativeAgentMind:
+         directory.mkdir(parents=True, exist_ok=True)
+         for child in ("evidence", "transcripts", "results", "sessions"):
+             (directory / child).mkdir(parents=True, exist_ok=True)
++        if self.config.adapter == "deepseek-harness":
++            (directory / "dsh-home").mkdir(parents=True, exist_ok=True)
+         (workspace_root / "shared").mkdir(parents=True, exist_ok=True)
+         prepare_writable_path = getattr(backend, "prepare_writable_path", None)
+         if callable(prepare_writable_path):
+@@ -522,6 +563,8 @@ class NativeAgentMind:
+                 turns=prior_turns,
+                 resumed=False,
+                 resume_session=False,
++                resume_requested=False,
++                resume_allowed=True,
+                 status="active",
+                 started_at=time.time(),
+                 transcript_refs=[],
+@@ -562,10 +605,13 @@ class NativeAgentMind:
+             "worker_name": self.config.worker_name,
+             "model": self.config.model,
+             "session_scope": "task",
+-            "resume_policy": "same_task_conclude_only",
++            "resume_policy": self._resume_policy,
++            "conclude_session_strategy": self._conclude_session_strategy,
+             "session_id": state.session_id,
+             "turns": state.turns,
+             "resumed": state.resumed,
++            "resume_session": state.resume_session,
++            "resume_requested": state.resume_requested,
+             "resume_allowed": state.resume_allowed,
+             "recoverable": False,
+             "status": state.status,
+@@ -652,6 +698,7 @@ class NativeAgentMind:
+         names = {
+             "claude-code": ("CLAUDE_CONFIG_DIR", "HOME"),
+             "codex-cli": ("CODEX_HOME", "HOME"),
++            "deepseek-harness": ("DSH_HOME",),
+             "pi-cli": ("PI_CODING_AGENT_DIR",),
+         }[self.config.adapter]
+         for name in names:
+@@ -992,7 +1039,12 @@ fi
+         initial_error: Exception,
+         transcript_refs: list[str],
+     ) -> tuple[dict[str, Any], CompletionProposal | None, dict[str, int], list[str], float]:
+-        """Resume one failed execute pass with a strict no-more-work conclude turn."""
++        """Run one strict, bounded conclude turn after a failed execute pass.
++
++        Codex/Claude/Pi reuse their task session. The patched DSH headless
++        runner receives the same task session ID and loads its persisted JSONL
++        history through ``agents.resume``.
++        """
+
+         trigger = self._conclude_trigger(initial_result)
+         initial_error_text = f"{type(initial_error).__name__}: {initial_error}"
+@@ -1011,12 +1063,16 @@ fi
+         state.fallback = {
+             "used": True,
+             "trigger": trigger,
++            "session_strategy": self._conclude_session_strategy,
+             "initial_error": initial_error_text[:2200],
+             "initial_transcript": initial_transcript,
+             "recovered": False,
+         }
+         self._write_manifest(state)
+         self._raise_if_cancelled(state, "before conclude fallback")
++        if self.config.adapter == "deepseek-harness":
++            state.resume_requested = True
++            self._write_manifest(state)
+
+         conclude_started_at = now()
+         conclude_result: CommandExecution | None = None
+@@ -1209,10 +1265,10 @@ fi
+                     # exits; conclude is reserved for timeout/parse fallback.
+                     self._mark_session_unusable(state)
+                     raise
+-                # Resume the same native session for Cairn's bounded conclude
+-                # pass whenever the CLI supplied a session ID.  Only explicit
+-                # missing-session diagnostics make that second call futile.
+-                if not state.resume_session or self._failed_execute_session_unusable(result):
++                # Enter Cairn's bounded conclude pass when the adapter can
++                # continue from its checkpoint. The patched DSH runner resumes
++                # the task-local JSONL session using Slime's fixed session ID.
++                if not self._can_run_conclude_fallback(state, task.mode, result):
+                     self._mark_session_unusable(state)
+                     raise
+                 (
+@@ -1623,6 +1679,60 @@ fi
+                 *codex_argv,
+             ]
+
++        if adapter == "deepseek-harness":
++            prompt_file = self._write_prompt_file(state, prompt)
++            patch_path = state.directory / "deepseek-harness.patch.yml"
++            patch_text = """- id: agent-default-model
++  config:
++    provider: deepseek-official
++    model: !!js process.env.DSH_MODEL
++- id: llm-deepseek
++  config:
++    reasoningEffort: !!js process.env.DSH_REASONING_EFFORT ?? 'high'
++- id: headless-runner
++  config:
++    task: !!js process.getBuiltinModule('fs').readFileSync(process.env.DSH_TASK_FILE, 'utf8')
++"""
++            temporary = patch_path.with_name(f"{patch_path.name}.{uuid4().hex}.tmp")
++            try:
++                with self._manifest_lock:
++                    temporary.write_text(patch_text, encoding="utf-8")
++                    temporary.replace(patch_path)
++            finally:
++                temporary.unlink(missing_ok=True)
++            container_patch = f"{state.container_directory}/{patch_path.name}"
++            dsh_home = f"{state.container_directory}/dsh-home"
++            script = r'''dsh_home="$1"
++prompt_file="$2"
++session_id="$3"
++resume_session_id="$4"
++shift 4
++exec env \
++  DSH_HOME="$dsh_home" \
++  DSH_TASK_FILE="$prompt_file" \
++  DSH_SESSION_ID="$session_id" \
++  DSH_RESUME_SESSION_ID="$resume_session_id" \
++  DSH_PERMISSION_MODE="${DSH_PERMISSION_MODE:-danger-full-access}" \
++  DSH_TELEMETRY_MODE="${DSH_TELEMETRY_MODE:-DISABLED}" \
++  "$@"
++'''
++            return [
++                "/bin/sh",
++                "-lc",
++                script,
++                "--",
++                dsh_home,
++                prompt_file,
++                state.session_id,
++                state.session_id if state.resume_requested else "",
++                self.config.binary,
++                "--profile",
++                "headless",
++                "--patch",
++                container_patch,
++                "placeholder",
++            ]
++
+         prompt_file = self._write_prompt_file(state, prompt)
+         argv = [
+             self.config.binary,
+@@ -1773,7 +1883,9 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
+
+         def record_session_id(value: Any) -> None:
+             session_id = str(value or "").strip()
+-            if session_id:
++            # DSH's headless runner owns the task-local ID supplied through
++            # DSH_SESSION_ID; never replace it with an internal event ID.
++            if session_id and state.resume_allowed and self.config.adapter != "deepseek-harness":
+                 state.session_id = session_id
+                 state.resume_session = True
+
+@@ -1831,9 +1943,13 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
+
+         if not messages:
+             stripped = stdout.strip()
++            # DeepSeek Harness's headless runner can print the requested
++            # contract as a Markdown fenced JSON block instead of a JSONL
++            # assistant event.  Use Cairn's tolerant parser here so that
++            # valid structured output is not mistaken for a missing answer.
+             try:
+-                raw_report = json.loads(stripped)
+-            except json.JSONDecodeError:
++                raw_report = parse_json_output(stripped)
++            except ValueError:
+                 raw_report = None
+             if isinstance(raw_report, dict) and any(
+                 key in raw_report
+diff --git a/tests/test_agent_match_integration.py b/tests/test_agent_match_integration.py
+index 482dcb8..d9fb65a 100644
+--- a/tests/test_agent_match_integration.py
++++ b/tests/test_agent_match_integration.py
+@@ -315,6 +315,18 @@ class AgentMatchIntegrationTests(unittest.TestCase):
+                 {**environment, "SLIME_CODEX_UPSTREAM_ENDPOINT": "https://example.com/responses"},
+             )
+
++        validate_competition_model_route(
++            "deepseek-harness",
++            "https://platform.fixture/llm-gateway/proxy/e/deepseek",
++            "openai-chat-completions",
++            {
++                "SLIME_COMPETITION_GATEWAY_ONLY": "true",
++                "SLIME_DEEPSEEK_UPSTREAM_ENDPOINT": (
++                    "https://api.deepseek.com/chat/completions"
++                ),
++            },
++        )
++
+
+ if __name__ == "__main__":
+     unittest.main()
+diff --git a/tests/test_deepseek_harness_patch.py b/tests/test_deepseek_harness_patch.py
+new file mode 100644
+index 0000000..2c0b8d5
+--- /dev/null
++++ b/tests/test_deepseek_harness_patch.py
+@@ -0,0 +1,93 @@
++from __future__ import annotations
++
++import importlib.util
++from pathlib import Path
++import tempfile
++import unittest
++
++
++SCRIPT = Path(__file__).parents[1] / "worker" / "scripts" / "patch_deepseek_harness.py"
++
++
++def load_module():
++    spec = importlib.util.spec_from_file_location("patch_deepseek_harness", SCRIPT)
++    assert spec is not None and spec.loader is not None
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++class DeepSeekHarnessPatchTests(unittest.TestCase):
++    def test_nullable_tool_metadata_does_not_overwrite_first_delta(self):
++        module = load_module()
++        with tempfile.TemporaryDirectory() as temporary:
++            package_root = Path(temporary) / "dsh-llm-deepseek"
++            root = package_root
++            (root / "lib").mkdir(parents=True)
++            (root / "package.json").write_text(
++                '{"name":"@deepseek-ai/dsh-llm-deepseek","version":"0.1.0-rc.7"}',
++                encoding="utf-8",
++            )
++            source = root / "lib" / "index.js"
++            source.write_text(
++                f"{module.OLD_ID}\n{module.OLD_NAME}\n",
++                encoding="utf-8",
++            )
++            headless = package_root.parent / "dsh-headless"
++            (headless / "lib").mkdir(parents=True)
++            (headless / "lib" / "index.js").write_text(
++                module.HEADLESS_OLD_RUN + "\n" + module.HEADLESS_OLD_SUMMARY,
++                encoding="utf-8",
++            )
++
++            self.assertTrue(module.patch(root))
++            patched = source.read_text(encoding="utf-8")
++            self.assertIn(module.NEW_ID, patched)
++            self.assertIn(module.NEW_NAME, patched)
++            self.assertFalse(module.patch(root))
++
++    def test_unexpected_adapter_source_fails_closed(self):
++        module = load_module()
++        with tempfile.TemporaryDirectory() as temporary:
++            package_root = Path(temporary) / "dsh-llm-deepseek"
++            root = package_root
++            (root / "lib").mkdir(parents=True)
++            (root / "package.json").write_text('{"version":"fixture"}', encoding="utf-8")
++            (root / "lib" / "index.js").write_text("unexpected\n", encoding="utf-8")
++
++            with self.assertRaises(SystemExit):
++                module.patch(root)
++
++    def test_headless_runner_accepts_stable_session_and_resume_id(self):
++        module = load_module()
++        with tempfile.TemporaryDirectory() as temporary:
++            package_root = Path(temporary) / "dsh-llm-deepseek"
++            root = package_root
++            (root / "lib").mkdir(parents=True)
++            (root / "package.json").write_text(
++                '{"name":"@deepseek-ai/dsh-llm-deepseek","version":"fixture"}',
++                encoding="utf-8",
++            )
++            (root / "lib" / "index.js").write_text(
++                f"{module.OLD_ID}\n{module.OLD_NAME}\n",
++                encoding="utf-8",
++            )
++            headless = package_root.parent / "dsh-headless"
++            (headless / "lib").mkdir(parents=True)
++            (headless / "lib" / "index.js").write_text(
++                module.HEADLESS_OLD_RUN + "\n" + module.HEADLESS_OLD_SUMMARY,
++                encoding="utf-8",
++            )
++
++            self.assertTrue(module.patch(root))
++            patched = (headless / "lib" / "index.js").read_text(encoding="utf-8")
++            self.assertIn("DSH_SESSION_ID", patched)
++            self.assertIn("DSH_RESUME_SESSION_ID", patched)
++            self.assertIn("agents.resume", patched)
++            self.assertIn("resumeSessionId: SessionId(resumeSessionId)", patched)
++            self.assertIn("await handle.dispose()", patched)
++            self.assertFalse(module.patch(root))
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_native_cancellation.py b/tests/test_native_cancellation.py
+index 746b286..23b080d 100644
+--- a/tests/test_native_cancellation.py
++++ b/tests/test_native_cancellation.py
+@@ -11,6 +11,7 @@ from unittest.mock import patch
+
+ from slime_cairn.server.blackboard import Blackboard
+ from slime_cairn.domain.context import ContextCapsule, ContextManifest
++from slime_cairn.protocol.contracts import parse_json_output
+ from slime_cairn.workers.errors import ModelInvocationCancelled
+ from slime_cairn.workers.execution import CommandExecution, DockerExecProcess, PersistentDockerBackend, PersistentDockerConfig
+ from slime_cairn.domain.models import Intent, WorkerTask
+@@ -280,6 +281,38 @@ class NativeCancellationTests(unittest.TestCase):
+             finally:
+                 mind.end_session("failed")
+
++    def test_deepseek_harness_fenced_json_is_extracted_as_result(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            backend = FakeBackend(Path(temporary))
++            mind = NativeAgentMind(
++                NativeAgentConfig("deepseek-native", "deepseek-harness", "dsh"),
++                lambda project_id: backend,
++            )
++            intent = Intent(
++                kind="bootstrap",
++                objective="fixture",
++                target_entity="fixture.local",
++                parent_fact_ids=[],
++                id="intent_dsh_fenced",
++                project_id="project_dsh_fenced",
++            )
++            task = WorkerTask("bootstrap", "fixture", intent.id, "fixture.local", [])
++            mind.begin_session(task, intent)
++            try:
++                output = (
++                    "```json\n"
++                    '{"accepted": true, "data": {"fact": '
++                    '{"description": "confirmed evidence"}}}\n'
++                    "```\n"
++                )
++                response, usage, commands = mind._extract_response(output)
++
++                self.assertEqual(parse_json_output(response)["accepted"], True)
++                self.assertEqual(usage, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
++                self.assertEqual(commands, [])
++            finally:
++                mind.end_session("completed")
++
+     def test_native_mind_cancels_matching_active_session_idempotently(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             root = Path(temporary)
+diff --git a/tests/test_native_config.py b/tests/test_native_config.py
+index 235b6b4..d7416da 100644
+--- a/tests/test_native_config.py
++++ b/tests/test_native_config.py
+@@ -52,7 +52,7 @@ class NativeDispatchConfigTests(unittest.TestCase):
+         )
+         return path
+
+-    def test_loads_three_direct_container_cli_workers(self):
++    def test_loads_four_direct_container_cli_workers(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             path = self.write_config(
+                 Path(temporary),
+@@ -75,6 +75,12 @@ class NativeDispatchConfigTests(unittest.TestCase):
+                         "execution": "native-agent",
+                         "task_types": ["reason"],
+                     },
++                    {
++                        "name": "deepseek-reason",
++                        "type": "dsh",
++                        "execution": "native-agent",
++                        "task_types": ["reason"],
++                    },
+                 ],
+             )
+             _, pool = load_dispatch_config(path, lambda project_id: object())
+@@ -83,6 +89,11 @@ class NativeDispatchConfigTests(unittest.TestCase):
+             self.assertIsInstance(pool.get("claude-bootstrap").mind, NativeAgentMind)
+             self.assertEqual(pool.get("codex-explore").mind.config.binary, "codex")
+             self.assertEqual(pool.get("pi-reason").mind.config.adapter, "pi-cli")
++            self.assertEqual(pool.get("deepseek-reason").mind.config.binary, "dsh")
++            self.assertEqual(
++                pool.get("deepseek-reason").mind.config.adapter,
++                "deepseek-harness",
++            )
+
+     def test_default_config_uses_a_general_capability_pool(self):
+         root = Path(__file__).parents[1]
+@@ -90,12 +101,21 @@ class NativeDispatchConfigTests(unittest.TestCase):
+
+         workers = payload["workers"]
+         expected = {"bootstrap", "explore", "reason"}
+-        self.assertEqual({worker["name"] for worker in workers}, {"claude-native", "codex-native", "pi-native"})
++        self.assertEqual(
++            {worker["name"] for worker in workers},
++            {
++                "claude-native",
++                "codex-native",
++                "deepseek-harness-native",
++                "pi-native",
++            },
++        )
+         self.assertTrue(all(set(worker["task_types"]) == expected for worker in workers))
+         enabled = {worker["name"]: worker.get("enabled", True) for worker in workers}
+-        self.assertTrue(enabled["codex-native"])
+-        self.assertTrue(enabled["pi-native"])
++        self.assertFalse(enabled["codex-native"])
++        self.assertFalse(enabled["pi-native"])
+         self.assertFalse(enabled["claude-native"])
++        self.assertTrue(enabled["deepseek-harness-native"])
+         claude = next(worker for worker in workers if worker["name"] == "claude-native")
+         self.assertEqual(claude["max_running"], 2)
+         self.assertEqual(claude["priority"], 0)
+@@ -138,6 +158,64 @@ class NativeDispatchConfigTests(unittest.TestCase):
+             "${SLIME_PI_API_KEY|SLIME_CODEX_API_KEY|SLIME_LLM_API_KEY}",
+         )
+         self.assertEqual(pi["env"]["PI_PROVIDER_API"], "openai-responses")
++        deepseek = next(
++            worker for worker in workers if worker["name"] == "deepseek-harness-native"
++        )
++        self.assertEqual(deepseek["type"], "deepseek-harness")
++        self.assertEqual(
++            deepseek["env"]["DSH_MODEL"],
++            "${SLIME_DEEPSEEK_MODEL|SLIME_CODEX_MODEL|SLIME_LLM_MODEL}",
++        )
++        self.assertEqual(deepseek["env"]["DSH_REASONING_EFFORT"], "max")
++        self.assertEqual(
++            deepseek["env"]["DEEPSEEK_BASE_URL"],
++            "${SLIME_DEEPSEEK_BASE_URL|SLIME_CODEX_BASE_URL|SLIME_LLM_BASE_URL}",
++        )
++        self.assertEqual(
++            deepseek["env"]["DEEPSEEK_API_KEY"],
++            "${SLIME_DEEPSEEK_API_KEY|SLIME_CODEX_API_KEY|SLIME_LLM_API_KEY}",
++        )
++        self.assertEqual(deepseek["env"]["DSH_PERMISSION_MODE"], "danger-full-access")
++        self.assertEqual(deepseek["env"]["DSH_TELEMETRY_MODE"], "DISABLED")
++
++    def test_cairn_explicit_deepseek_env_builds_chat_completions_endpoint(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            path = self.write_config(
++                Path(temporary),
++                [
++                    {
++                        "name": "deepseek-explicit",
++                        "type": "deepseek",
++                        "execution": "native-agent",
++                        "task_types": ["bootstrap", "explore", "reason"],
++                        "env": {
++                            "DSH_MODEL": "${TEST_DEEPSEEK_MODEL}",
++                            "DEEPSEEK_BASE_URL": "${TEST_DEEPSEEK_BASE_URL}",
++                            "DEEPSEEK_API_KEY": "${TEST_DEEPSEEK_API_KEY}",
++                        },
++                    }
++                ],
++            )
++            environment = {
++                "TEST_DEEPSEEK_MODEL": "deepseek-v4-flash",
++                "TEST_DEEPSEEK_BASE_URL": "https://models.example/v1",
++                "TEST_DEEPSEEK_API_KEY": "deepseek-secret-key",
++            }
++            with patch.dict("os.environ", environment, clear=True):
++                _, pool = load_dispatch_config(path, lambda project_id: object())
++
++            native = pool.get("deepseek-explicit").mind.config
++            self.assertEqual(native.adapter, "deepseek-harness")
++            self.assertEqual(native.binary, "dsh")
++            self.assertEqual(native.model, "deepseek-v4-flash")
++            self.assertEqual(native.provider, "deepseek-official")
++            self.assertEqual(
++                native.environment["DEEPSEEK_API_KEY"],
++                "deepseek-secret-key",
++            )
++            self.assertEqual(native.model_endpoint.base_url, "https://models.example/v1")
++            self.assertEqual(native.model_endpoint.protocol, "openai-chat-completions")
++            self.assertNotIn("deepseek-secret-key", repr(native.model_endpoint))
+
+     def test_prompt_group_is_loaded_and_propagated_to_native_workers(self):
+         with tempfile.TemporaryDirectory() as temporary:
+diff --git a/tests/test_native_session_recovery.py b/tests/test_native_session_recovery.py
+index 68f9b14..ab31790 100644
+--- a/tests/test_native_session_recovery.py
++++ b/tests/test_native_session_recovery.py
+@@ -400,6 +400,138 @@ class NativeSessionRecoveryTests(unittest.TestCase):
+             self.assertEqual(prompt_path.read_text(encoding="utf-8"), prompt)
+             self.assertLess(max(len(item) for item in argv), 4_096)
+
++    def test_deepseek_harness_uses_file_prompt_and_task_session(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            backend = RecordingBackend(Path(temporary))
++            mind = NativeAgentMind(
++                NativeAgentConfig(
++                    "deepseek-harness-native",
++                    "deepseek-harness",
++                    "dsh",
++                    model="deepseek-v4-flash",
++                    provider="deepseek-official",
++                    environment={
++                        "DSH_MODEL": "deepseek-v4-flash",
++                        "DSH_REASONING_EFFORT": "max",
++                        "DEEPSEEK_BASE_URL": "https://models.example/v1",
++                        "DEEPSEEK_API_KEY": "deepseek-top-secret",
++                    },
++                    model_endpoint=ModelEndpoint(
++                        "https://models.example/v1",
++                        "deepseek-top-secret",
++                        "openai-chat-completions",
++                    ),
++                ),
++                lambda project_id: backend,
++            )
++            task, intent = task_and_intent("deepseek-harness-native")
++            info = mind.begin_session(task, intent)
++            try:
++                state = mind._state()
++                prompt = "explore task:" + ("x" * 40_000)
++                argv = mind._build_argv(state, prompt)
++                mind._extract_attempt_metadata(
++                    json.dumps({"session_id": "must-not-resume", "summary": "fixture"})
++                )
++                updated = mind.session_info()
++            finally:
++                ended = mind.end_session("completed")
++
++            self.assertEqual(info["resume_policy"], "same_task_conclude_only")
++            self.assertTrue(info["resume_allowed"])
++            self.assertEqual(updated["resume_policy"], "same_task_conclude_only")
++            self.assertTrue(updated["resume_allowed"])
++            self.assertFalse(ended["resume_allowed"])
++            self.assertFalse(state.resume_session)
++            self.assertNotEqual(state.session_id, "must-not-resume")
++            self.assertEqual(argv[:2], ["/bin/sh", "-lc"])
++            self.assertIn("dsh", argv)
++            self.assertIn("--profile", argv)
++            self.assertIn("headless", argv)
++            self.assertIn("--patch", argv)
++            self.assertIn("DSH_SESSION_ID", argv[2])
++            self.assertIn("DSH_RESUME_SESSION_ID", argv[2])
++            self.assertNotIn("--session", argv)
++            self.assertNotIn("--session-id", argv)
++            self.assertNotIn(prompt, argv)
++            self.assertNotIn("deepseek-top-secret", " ".join(argv))
++            prompt_path = next(backend.workspace_root.glob("pods/**/prompt.txt"))
++            self.assertEqual(prompt_path.read_text(encoding="utf-8"), prompt)
++            patch_path = next(
++                backend.workspace_root.glob("pods/**/deepseek-harness.patch.yml")
++            )
++            patch_text = patch_path.read_text(encoding="utf-8")
++            self.assertIn("process.env.DSH_MODEL", patch_text)
++            self.assertIn("process.env.DSH_REASONING_EFFORT", patch_text)
++            self.assertIn("process.env.DSH_TASK_FILE", patch_text)
++            self.assertNotIn("deepseek-v4-flash", patch_text)
++            self.assertLess(max(len(item) for item in argv), 4_096)
++
++    def test_deepseek_timeout_resumes_same_task_session_for_conclude(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            root = Path(temporary)
++            conclude_payload = {
++                "accepted": True,
++                "data": {"fact": {"description": "preserved evidence from the timed-out pass"}},
++            }
++            conclude_stdout = json.dumps(
++                {
++                    "type": "item.completed",
++                    "item": {
++                        "type": "agent_message",
++                        "text": json.dumps(conclude_payload),
++                    },
++                }
++            )
++            backend = RecordingBackend(
++                root,
++                [
++                    CommandExecution(124, "", "", timed_out=True),
++                    CommandExecution(0, conclude_stdout, ""),
++                ],
++            )
++            mind = NativeAgentMind(
++                NativeAgentConfig(
++                    "deepseek-harness-native",
++                    "deepseek-harness",
++                    "dsh",
++                    model="deepseek-v4-flash",
++                    bootstrap_timeout=31,
++                    bootstrap_conclude_timeout=7,
++                ),
++                lambda project_id: backend,
++            )
++            task, intent = task_and_intent("deepseek-harness-native")
++
++            report = mind.run_cairn_task(intent, [], "bootstrap", capsule())
++
++            self.assertEqual(report.status, "completed")
++            self.assertEqual(report.stop_reason, "native_agent_conclude_fallback")
++            self.assertEqual(len(backend.calls), 2)
++            self.assertEqual(
++                report.candidate_facts[0].object,
++                "preserved evidence from the timed-out pass",
++            )
++            self.assertNotIn("--session", backend.calls[1])
++            self.assertIn("DSH_RESUME_SESSION_ID", backend.calls[1][2])
++            self.assertEqual(report.model_session["conclude_session_strategy"], "same_task_session")
++            self.assertTrue(report.model_session["resume_requested"])
++            self.assertTrue(report.model_session["fallback"]["recovered"])
++            self.assertEqual(
++                report.model_session["fallback"]["session_strategy"],
++                "same_task_session",
++            )
++            manifest_path = next(root.glob("pods/deepseek-harness-native/*/session.json"))
++            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
++            self.assertEqual(manifest["conclude_session_strategy"], "same_task_session")
++            self.assertTrue(manifest["resume_requested"])
++            self.assertEqual(len(manifest["transcript_refs"]), 2)
++            phases = [
++                json.loads(path.read_text(encoding="utf-8"))["phase"]
++                for path in sorted(root.glob("pods/deepseek-harness-native/*/transcripts/turn-*.json"))
++            ]
++            self.assertEqual(phases, ["execute", "conclude"])
++
+     def test_claude_reason_is_a_tool_free_cairn_planning_turn(self):
+         with tempfile.TemporaryDirectory() as temporary:
+             backend = RecordingBackend(Path(temporary))

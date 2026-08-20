@@ -53,6 +53,7 @@
     {
       "name": "codex-native",
       "type": "codex",
+      "enabled": false,
       "execution": "native-agent",
       "task_types": ["bootstrap", "explore", "reason"],
       "max_running": 8,
@@ -100,6 +101,25 @@
       },
       "environment": {
         "CLAUDE_CONFIG_DIR": "/workspace/shared/agent-homes/claude"
+      }
+    },
+    {
+      "name": "deepseek-harness-native",
+      "type": "deepseek-harness",
+      "enabled": true,
+      "execution": "native-agent",
+      "task_types": ["bootstrap", "explore", "reason"],
+      "max_running": 8,
+      "priority": 0,
+      "max_report_items": 30,
+      "container_preflight": false,
+      "env": {
+        "DSH_MODEL": "${SLIME_DEEPSEEK_MODEL|SLIME_CODEX_MODEL|SLIME_LLM_MODEL}",
+        "DSH_REASONING_EFFORT": "max",
+        "DEEPSEEK_BASE_URL": "${SLIME_DEEPSEEK_BASE_URL|SLIME_CODEX_BASE_URL|SLIME_LLM_BASE_URL}",
+        "DEEPSEEK_API_KEY": "${SLIME_DEEPSEEK_API_KEY|SLIME_CODEX_API_KEY|SLIME_LLM_API_KEY}",
+        "DSH_PERMISSION_MODE": "danger-full-access",
+        "DSH_TELEMETRY_MODE": "DISABLED"
       }
     }
   ]

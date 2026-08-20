@@ -4,19 +4,39 @@ on:
   push:
     tags:
       - "v*"
+      - "slime.v*"
   workflow_dispatch:
     inputs:
       tag:
         description: Container image tag
         required: true
-        default: "0.0.37"
+        default: "0.0.39"
         type: string
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
+  release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/slime.v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="${GITHUB_REF_NAME/slime./slime-}"
+          notes="docs/releases/${title}.md"
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "$title" \
+              --notes-file "$notes"
+
   publish:
     name: Publish ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -37,6 +57,18 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Resolve image tag
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/slime.v* ]]; then
+            echo "value=0.${GITHUB_REF_NAME#slime.v}" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Sign in to GHCR
         uses: docker/login-action@v3
         with:
@@ -50,9 +82,8 @@ jobs:
         with:
           images: ghcr.io/moumouhao12138-sketch/${{ matrix.image }}
           tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=${{ steps.version.outputs.value }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
 
       - name: Build and publish
         uses: docker/build-push-action@v6

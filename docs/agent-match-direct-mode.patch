@@ -1,0 +1,39 @@
+diff --git a/docs/USER_GUIDE.md b/docs/USER_GUIDE.md
+--- a/docs/USER_GUIDE.md
++++ b/docs/USER_GUIDE.md
+@@ -42,6 +42,8 @@
+
+ 创建成功后项目状态为 `running`，Dispatcher 会自动发现并调度，无需单独启动 Worker。
+
++Agent Match 测试平台创建的项目固定使用 `direct`：先运行 Cairn Bootstrap，证据充分时允许直接完成；未完成时再进入 Reason/Explore。
++
+ ## 3. 查看项目
+
+ 列出项目：
+diff --git a/src/slime_cairn/integrations/agent_match/runtime.py b/src/slime_cairn/integrations/agent_match/runtime.py
+--- a/src/slime_cairn/integrations/agent_match/runtime.py
++++ b/src/slime_cairn/integrations/agent_match/runtime.py
+@@ -624,7 +624,8 @@ class AgentMatchProjectController:
+         return {
+             "targets": targets,
+             "origin": f"competition exercise {int(detail.get('id') or 0)}",
+-            "bootstrap_enabled": False,
++            "start_mode": "direct",
++            "bootstrap_enabled": True,
+             "hints": [],
+             "submission": {
+                 "managed": True,
+diff --git a/tests/test_agent_match_integration.py b/tests/test_agent_match_integration.py
+--- a/tests/test_agent_match_integration.py
++++ b/tests/test_agent_match_integration.py
+@@ -152,7 +152,9 @@ class AgentMatchIntegrationTests(unittest.TestCase):
+         started = self.controller.start(1001)
+         project_id = started["project"]["id"]
+         project = self.board.get_project(project_id)
+-        self.assertFalse(project.scope["bootstrap_enabled"])
++        self.assertEqual(project.scope["start_mode"], "direct")
++        self.assertTrue(project.scope["bootstrap_enabled"])
++        self.assertEqual(Scheduler._start_mode(project), "direct")
+         self.assertEqual(project.target, "198.51.100.10:30080")
+         self.assertTrue(project.scope["submission"]["managed"])
+         self.assertEqual(project.scope["submission"]["platform"], "agent_match")

@@ -1,0 +1,12 @@
+ARG BASE_IMAGE=slime-local:0.0.37-before-agent-match-hybrid
+FROM ${BASE_IMAGE}
+
+WORKDIR /app
+
+# Keep the deployed application identical to the preserved direct-mode image
+# except for the Agent Match project-scope builder.
+COPY src/slime_cairn/integrations/agent_match/runtime.py \
+     /app/src/slime_cairn/integrations/agent_match/runtime.py
+
+RUN python -m compileall -q \
+    /app/src/slime_cairn/integrations/agent_match/runtime.py

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from slime_cairn.server.blackboard import Blackboard
 from slime_cairn.domain.context import ContextCapsule, ContextManifest
+from slime_cairn.protocol.contracts import parse_json_output
 from slime_cairn.workers.errors import ModelInvocationCancelled
 from slime_cairn.workers.execution import CommandExecution, DockerExecProcess, PersistentDockerBackend, PersistentDockerConfig
 from slime_cairn.domain.models import Intent, WorkerTask
@@ -279,6 +280,38 @@ class NativeCancellationTests(unittest.TestCase):
                     mind._extract_response(output)
             finally:
                 mind.end_session("failed")
+
+    def test_deepseek_harness_fenced_json_is_extracted_as_result(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = FakeBackend(Path(temporary))
+            mind = NativeAgentMind(
+                NativeAgentConfig("deepseek-native", "deepseek-harness", "dsh"),
+                lambda project_id: backend,
+            )
+            intent = Intent(
+                kind="bootstrap",
+                objective="fixture",
+                target_entity="fixture.local",
+                parent_fact_ids=[],
+                id="intent_dsh_fenced",
+                project_id="project_dsh_fenced",
+            )
+            task = WorkerTask("bootstrap", "fixture", intent.id, "fixture.local", [])
+            mind.begin_session(task, intent)
+            try:
+                output = (
+                    "```json\n"
+                    '{"accepted": true, "data": {"fact": '
+                    '{"description": "confirmed evidence"}}}\n'
+                    "```\n"
+                )
+                response, usage, commands = mind._extract_response(output)
+
+                self.assertEqual(parse_json_output(response)["accepted"], True)
+                self.assertEqual(usage, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
+                self.assertEqual(commands, [])
+            finally:
+                mind.end_session("completed")
 
     def test_native_mind_cancels_matching_active_session_idempotently(self):
         with tempfile.TemporaryDirectory() as temporary:

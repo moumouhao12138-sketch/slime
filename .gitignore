@@ -18,6 +18,7 @@ dist/
 .slime-smoke-sessions/
 slime-workspaces/
 runs/
+attachments/
 *.db
 *.db-shm
 *.db-wal

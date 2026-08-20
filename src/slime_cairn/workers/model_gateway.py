@@ -69,6 +69,7 @@ _UPSTREAM_ENV_BY_WORKER = {
     "codex-cli": "SLIME_CODEX_UPSTREAM_ENDPOINT",
     "pi-cli": "SLIME_PI_UPSTREAM_ENDPOINT",
     "claude-code": "SLIME_CLAUDE_UPSTREAM_ENDPOINT",
+    "deepseek-harness": "SLIME_DEEPSEEK_UPSTREAM_ENDPOINT",
 }
 _REQUIRED_SUFFIX_BY_PROTOCOL = {
     "openai-responses": "/responses",

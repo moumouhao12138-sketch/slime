@@ -400,6 +400,138 @@ class NativeSessionRecoveryTests(unittest.TestCase):
             self.assertEqual(prompt_path.read_text(encoding="utf-8"), prompt)
             self.assertLess(max(len(item) for item in argv), 4_096)
 
+    def test_deepseek_harness_uses_file_prompt_and_task_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = RecordingBackend(Path(temporary))
+            mind = NativeAgentMind(
+                NativeAgentConfig(
+                    "deepseek-harness-native",
+                    "deepseek-harness",
+                    "dsh",
+                    model="deepseek-v4-flash",
+                    provider="deepseek-official",
+                    environment={
+                        "DSH_MODEL": "deepseek-v4-flash",
+                        "DSH_REASONING_EFFORT": "max",
+                        "DEEPSEEK_BASE_URL": "https://models.example/v1",
+                        "DEEPSEEK_API_KEY": "deepseek-top-secret",
+                    },
+                    model_endpoint=ModelEndpoint(
+                        "https://models.example/v1",
+                        "deepseek-top-secret",
+                        "openai-chat-completions",
+                    ),
+                ),
+                lambda project_id: backend,
+            )
+            task, intent = task_and_intent("deepseek-harness-native")
+            info = mind.begin_session(task, intent)
+            try:
+                state = mind._state()
+                prompt = "explore task:" + ("x" * 40_000)
+                argv = mind._build_argv(state, prompt)
+                mind._extract_attempt_metadata(
+                    json.dumps({"session_id": "must-not-resume", "summary": "fixture"})
+                )
+                updated = mind.session_info()
+            finally:
+                ended = mind.end_session("completed")
+
+            self.assertEqual(info["resume_policy"], "same_task_conclude_only")
+            self.assertTrue(info["resume_allowed"])
+            self.assertEqual(updated["resume_policy"], "same_task_conclude_only")
+            self.assertTrue(updated["resume_allowed"])
+            self.assertFalse(ended["resume_allowed"])
+            self.assertFalse(state.resume_session)
+            self.assertNotEqual(state.session_id, "must-not-resume")
+            self.assertEqual(argv[:2], ["/bin/sh", "-lc"])
+            self.assertIn("dsh", argv)
+            self.assertIn("--profile", argv)
+            self.assertIn("headless", argv)
+            self.assertIn("--patch", argv)
+            self.assertIn("DSH_SESSION_ID", argv[2])
+            self.assertIn("DSH_RESUME_SESSION_ID", argv[2])
+            self.assertNotIn("--session", argv)
+            self.assertNotIn("--session-id", argv)
+            self.assertNotIn(prompt, argv)
+            self.assertNotIn("deepseek-top-secret", " ".join(argv))
+            prompt_path = next(backend.workspace_root.glob("pods/**/prompt.txt"))
+            self.assertEqual(prompt_path.read_text(encoding="utf-8"), prompt)
+            patch_path = next(
+                backend.workspace_root.glob("pods/**/deepseek-harness.patch.yml")
+            )
+            patch_text = patch_path.read_text(encoding="utf-8")
+            self.assertIn("process.env.DSH_MODEL", patch_text)
+            self.assertIn("process.env.DSH_REASONING_EFFORT", patch_text)
+            self.assertIn("process.env.DSH_TASK_FILE", patch_text)
+            self.assertNotIn("deepseek-v4-flash", patch_text)
+            self.assertLess(max(len(item) for item in argv), 4_096)
+
+    def test_deepseek_timeout_resumes_same_task_session_for_conclude(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            conclude_payload = {
+                "accepted": True,
+                "data": {"fact": {"description": "preserved evidence from the timed-out pass"}},
+            }
+            conclude_stdout = json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {
+                        "type": "agent_message",
+                        "text": json.dumps(conclude_payload),
+                    },
+                }
+            )
+            backend = RecordingBackend(
+                root,
+                [
+                    CommandExecution(124, "", "", timed_out=True),
+                    CommandExecution(0, conclude_stdout, ""),
+                ],
+            )
+            mind = NativeAgentMind(
+                NativeAgentConfig(
+                    "deepseek-harness-native",
+                    "deepseek-harness",
+                    "dsh",
+                    model="deepseek-v4-flash",
+                    bootstrap_timeout=31,
+                    bootstrap_conclude_timeout=7,
+                ),
+                lambda project_id: backend,
+            )
+            task, intent = task_and_intent("deepseek-harness-native")
+
+            report = mind.run_cairn_task(intent, [], "bootstrap", capsule())
+
+            self.assertEqual(report.status, "completed")
+            self.assertEqual(report.stop_reason, "native_agent_conclude_fallback")
+            self.assertEqual(len(backend.calls), 2)
+            self.assertEqual(
+                report.candidate_facts[0].object,
+                "preserved evidence from the timed-out pass",
+            )
+            self.assertNotIn("--session", backend.calls[1])
+            self.assertIn("DSH_RESUME_SESSION_ID", backend.calls[1][2])
+            self.assertEqual(report.model_session["conclude_session_strategy"], "same_task_session")
+            self.assertTrue(report.model_session["resume_requested"])
+            self.assertTrue(report.model_session["fallback"]["recovered"])
+            self.assertEqual(
+                report.model_session["fallback"]["session_strategy"],
+                "same_task_session",
+            )
+            manifest_path = next(root.glob("pods/deepseek-harness-native/*/session.json"))
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["conclude_session_strategy"], "same_task_session")
+            self.assertTrue(manifest["resume_requested"])
+            self.assertEqual(len(manifest["transcript_refs"]), 2)
+            phases = [
+                json.loads(path.read_text(encoding="utf-8"))["phase"]
+                for path in sorted(root.glob("pods/deepseek-harness-native/*/transcripts/turn-*.json"))
+            ]
+            self.assertEqual(phases, ["execute", "conclude"])
+
     def test_claude_reason_is_a_tool_free_cairn_planning_turn(self):
         with tempfile.TemporaryDirectory() as temporary:
             backend = RecordingBackend(Path(temporary))

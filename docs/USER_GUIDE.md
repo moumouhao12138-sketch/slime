@@ -42,6 +42,8 @@
 
 创建成功后项目状态为 `running`，Dispatcher 会自动发现并调度，无需单独启动 Worker。
 
+Agent Match 测试平台创建的项目固定使用 `hybrid`：先运行 Cairn Bootstrap 建立事实，再强制进入 Reason，由黏菌分支调度 Explore；Bootstrap 不会直接结束平台项目。
+
 ## 3. 查看项目
 
 列出项目：
@@ -139,7 +141,7 @@ Worker 条目的 workers[].max_running
 当前健康且支持该任务类型的 Worker 容量
 ```
 
-默认值为：全局 `8`、单项目 `4`、同时调度项目 `3`。默认 Codex 条目的 `max_running` 为 `8`，因此单个项目通常最多同时执行 `4` 个任务。
+默认值为：全局 `8`、单项目 `4`、同时调度项目 `3`。默认 DeepSeek Harness 条目的 `max_running` 为 `8`，因此单个项目通常最多同时执行 `4` 个任务。
 
 `runtime.reason_batch_size` 表示积累多少个完成信号后优先唤醒 Reason，不是分支数，也不是并发数。
 

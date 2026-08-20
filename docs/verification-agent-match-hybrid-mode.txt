@@ -1,0 +1,123 @@
+Agent Match hybrid startup mode verification
+Date: 2026-08-20 UTC
+
+Scope
+  Newly started or reactivated Agent Match exercises now persist:
+    start_mode=hybrid
+    bootstrap_enabled=true
+  The scheduler runs Cairn Bootstrap first, records its facts, defers a
+  Bootstrap completion report, then enters Reason so the Slime branch can
+  create Explore intents.  Explore remains the branch that performs the
+  parallel follow-up work.
+
+  Existing projects retain their recorded scope.  No existing project was
+  migrated, stopped, or restarted by this change.
+
+Changed source and documentation
+  docs/USER_GUIDE.md
+    sha256 3b9e696ce054fa0a68d3b2b1f6fb23cad389c55dc88dad704805983b4167ab56
+  src/slime_cairn/integrations/agent_match/runtime.py
+    sha256 edb2ff1735c88e9ad91e912af08b5b1df6965131278224a7b919511d7a34e411
+  tests/test_agent_match_integration.py
+    sha256 77c9f2b7f8342c672a43a684efb3c7b339af42b23b46b3107fcfea79bfd6185b
+
+Direct-mode baseline used by the forward/rollback rehearsal
+  docs/USER_GUIDE.md
+    sha256 19c2b96369fb41cbc21b89cc86e38a5f0ad91c5af3eab1b7c42bd9a0c4c0183d
+  src/slime_cairn/integrations/agent_match/runtime.py
+    sha256 b92dcf481123790cde866719ee034b77d68128bdb4c100dfc13c652af65ac7f5
+  tests/test_agent_match_integration.py
+    sha256 78b264739f33715fabb664417416deb30e7c0ec6f586645c7e07022bf8778483
+
+Patch and rollback artifacts
+  docs/agent-match-hybrid-mode.patch
+    sha256 8441e63f2dd21fbb4c95402cc9e7e2143abc8aafec910d08f7937ad4b770f425
+  scripts/rollback-agent-match-hybrid-mode.sh
+    sha256 bfb87b501dabf0edc76046884e7783a49fc260496376b2330f34d76028085e3d
+  scripts/Dockerfile.agent-match-hybrid
+    sha256 af844a4fc61f1f77ef047bf5bb4afd954faddf7fadfa244bfcdfec028876c20a
+
+Patch checks
+  Command:
+    git apply --reverse --check docs/agent-match-hybrid-mode.patch
+    git diff --check
+  Result:
+    no output
+    exit status: 0
+
+Detached-worktree forward and rollback rehearsal
+  A detached worktree was seeded with the direct-mode patch, then the hybrid
+  patch was applied and the following command was run:
+    docker run --rm -e PYTHONPATH=/app/src \
+      -v "$verify_dir:/app" -w /app slime-local:0.0.37 \
+      python -m unittest -v \
+        tests.test_agent_match_integration \
+        tests.test_project_start_modes \
+        tests.test_cairn_runtime
+  Literal result:
+    Ran 21 tests in 18.600s
+    OK
+    exit status: 0
+  The hybrid patch was then applied in reverse.
+  Literal result:
+    rollback_hash_match=true
+    exit status: 0
+  Post-rollback scope check:
+    start_mode=direct
+    bootstrap_enabled=true
+    exit status: 0
+
+Deployed-image regression
+  Command:
+    docker run --rm -e PYTHONPATH=/app/src \
+      -v ${REPO_ROOT}/tests:/app/tests:ro -w /app slime-local:0.0.37 \
+      python -m unittest -v \
+        tests.test_agent_match_integration \
+        tests.test_project_start_modes \
+        tests.test_cairn_runtime
+  Literal result:
+    Ran 21 tests in 17.380s
+    OK
+    exit status: 0
+
+Application image
+  Preserved direct-mode rollback image:
+    slime-local:0.0.37-before-agent-match-hybrid
+    sha256 c8d98d08596886c7a5c6473202e7fab18375dab6fed65f0718b598c61883b80d
+  Deployed hybrid image:
+    slime-local:0.0.37
+    sha256 c711e1014934899494b25a4d8f8c6522953d73ae381e337ce03c2f9a836a7eb3
+  Build source:
+    scripts/Dockerfile.agent-match-hybrid
+  Image-level check:
+    start_mode=hybrid
+    bootstrap_enabled=true
+    exit status: 0
+
+Deployment
+  Command:
+    docker compose up -d --no-deps --no-build --force-recreate api
+  Result:
+    API /health: {"ok":true,"version":"0.0.37"}
+    API container: d19f3e423726c8077018dfc327c5aa88fac518fb4b8f11eb38ddbc23771c673e
+    API health: healthy
+    Runtime scope check: start_mode=hybrid, bootstrap_enabled=true
+    Dispatcher container before/after:
+      25e45936116d38be107fc9c652fd7f110551e0ca0ef25f18263971d2a992b298
+      25e45936116d38be107fc9c652fd7f110551e0ca0ef25f18263971d2a992b298
+    Existing project Worker before/after:
+      120cf3f102d449917fa6f7ae414839b1cc591167617c3e7cdbb927e7e39d51fc
+      120cf3f102d449917fa6f7ae414839b1cc591167617c3e7cdbb927e7e39d51fc
+    exit status: 0
+
+Rollback
+  Source-only rehearsal:
+    SLIME_SOURCE_ONLY_ROLLBACK=1 bash scripts/rollback-agent-match-hybrid-mode.sh
+  Restores the source patch to direct mode.  With the preserved image present,
+  the same script retags slime-local:0.0.37 and recreates only the API:
+    docker tag slime-local:0.0.37-before-agent-match-hybrid slime-local:0.0.37
+    docker compose up -d --no-deps --no-build --force-recreate api
+
+Operational note
+  The existing project Worker was already exited with code 143 before the
+  API-only deployment.  This change did not restart it or alter its image.

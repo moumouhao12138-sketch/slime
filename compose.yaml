@@ -1,7 +1,7 @@
 name: slime
 
 x-app: &app
-  image: ${SLIME_APP_IMAGE:-ghcr.io/moumouhao12138-sketch/slime:0.0.37}
+  image: ${SLIME_APP_IMAGE:-ghcr.io/moumouhao12138-sketch/slime:0.0.39}
   build:
     context: .
     dockerfile: Dockerfile
@@ -18,7 +18,7 @@ x-app: &app
     SLIME_RUNTIME_EXECUTION: container
     SLIME_WORKSPACES_ROOT: /workspaces
     SLIME_WORKSPACES_VOLUME: slime-workspaces
-    SLIME_WORKER_IMAGE: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37}
+    SLIME_WORKER_IMAGE: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.39}
     SLIME_LAB_NETWORK: slime-lab
   init: true
   restart: unless-stopped
@@ -72,7 +72,7 @@ services:
       - slime-lab
 
   worker-image:
-    image: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37}
+    image: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.39}
     build:
       context: worker
       dockerfile: ${SLIME_WORKER_DOCKERFILE:-Dockerfile}
@@ -81,6 +81,7 @@ services:
         KALI_APT_MIRROR: ${SLIME_KALI_APT_MIRROR:-http://http.kali.org/kali}
         KALI_APT_VERIFY_PEER: ${SLIME_KALI_APT_VERIFY_PEER:-true}
         INSTALL_NATIVE_AGENTS: ${SLIME_INSTALL_NATIVE_AGENTS:-true}
+        DEEPSEEK_HARNESS_VERSION: ${SLIME_DEEPSEEK_HARNESS_VERSION:-0.1.0-rc.7}
         INSTALL_REFERENCE_ASSETS: ${SLIME_INSTALL_REFERENCE_ASSETS:-true}
         INSTALL_CTF_REFERENCE_ASSETS: ${SLIME_INSTALL_CTF_REFERENCE_ASSETS:-true}
     command:

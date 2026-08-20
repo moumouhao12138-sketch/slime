@@ -56,6 +56,7 @@ DEFINITIONS = [
     ("codex", "agent", True, []),
     ("claude", "agent", True, []),
     ("pi", "agent", True, []),
+    ("dsh", "agent", True, []),
 ]
 
 
@@ -71,6 +72,7 @@ def version_of(path: str) -> str:
                 "CODEX_HOME": str(Path(probe_home) / ".codex"),
                 "CLAUDE_CONFIG_DIR": str(Path(probe_home) / ".claude"),
                 "PI_CODING_AGENT_DIR": str(Path(probe_home) / ".pi"),
+                "DSH_HOME": str(Path(probe_home) / ".dsh"),
             }
         )
         for args in ([path, "--version"], [path, "-V"]):

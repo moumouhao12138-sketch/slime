@@ -20,6 +20,11 @@ def load_manifest_module():
 
 
 class WorkerToolManifestTests(unittest.TestCase):
+    def test_deepseek_harness_is_in_agent_inventory(self):
+        module = load_manifest_module()
+
+        self.assertIn(("dsh", "agent", True, []), module.DEFINITIONS)
+
     def test_version_probe_does_not_write_to_runtime_home(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

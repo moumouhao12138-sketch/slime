@@ -74,7 +74,7 @@ def _managed_submission(scope: dict[str, Any]) -> bool:
 
 
 class NativeConcludeFallbackError(ModelInvocationError):
-    """A failed execute pass whose same-session conclude pass also failed."""
+    """A failed execute pass whose bounded conclude pass also failed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +109,12 @@ class NativeAgentConfig:
     container_preflight: bool = True
 
     def __post_init__(self) -> None:
-        if self.adapter not in {"claude-code", "codex-cli", "pi-cli"}:
+        if self.adapter not in {
+            "claude-code",
+            "codex-cli",
+            "deepseek-harness",
+            "pi-cli",
+        }:
             raise ValueError(f"native-agent 不支持 Adapter: {self.adapter}")
         if not self.worker_name.strip() or not self.binary.strip():
             raise ValueError("native-agent 需要 worker_name 和 binary")
@@ -177,6 +182,9 @@ class NativeSessionState:
     # Sessions are task-scoped. ``resume_session`` becomes true only after the
     # execute phase reports an ID that this task's conclude phase can resume.
     resume_session: bool = False
+    # DSH's headless runner receives this explicit flag for its conclude
+    # invocation; it is separate from adapter-emitted session metadata.
+    resume_requested: bool = False
     resume_allowed: bool = True
     status: str = "active"
     started_at: float = field(default_factory=time.time)
@@ -219,6 +227,16 @@ class NativeAgentMind:
     cairn_native_runner = True
     _resource_lock = threading.RLock()
     _active_port_blocks: dict[str, dict[int, str]] = {}
+
+    @property
+    def _resume_policy(self) -> str:
+        return "same_task_conclude_only"
+
+    @property
+    def _conclude_session_strategy(self) -> str:
+        """Describe how a bounded conclude turn gets its model context."""
+
+        return "same_task_session"
 
     def __init__(self, config: NativeAgentConfig, backend_resolver: NativeBackendResolver) -> None:
         self.config = config
@@ -397,13 +415,15 @@ class NativeAgentMind:
                 "intent_id": state.intent_id,
                 "mode": state.mode,
                 "session_scope": "task",
-                "resume_policy": "same_task_conclude_only",
+                "resume_policy": self._resume_policy,
+                "conclude_session_strategy": self._conclude_session_strategy,
                 "session_id": state.session_id,
                 "directory": state.directory.relative_to(state.workspace_root).as_posix(),
                 "container_directory": state.container_directory,
                 "turns": state.turns,
                 "resumed": state.resumed,
                 "resume_session": state.resume_session,
+                "resume_requested": state.resume_requested,
                 "resume_allowed": state.resume_allowed,
                 "status": state.status,
                 "started_at": state.started_at,
@@ -471,6 +491,25 @@ class NativeAgentMind:
             return True
         return False
 
+    def _can_run_conclude_fallback(
+        self,
+        state: NativeSessionState,
+        mode: str,
+        result: CommandExecution,
+    ) -> bool:
+        """Return whether this task may enter Cairn's bounded conclude phase.
+
+        The regular native adapters need a usable session ID emitted by their
+        CLI. The patched DSH runner uses Slime's fixed task session ID, so its
+        conclude process can request resume without adapter-emitted metadata.
+        """
+
+        if mode not in {"bootstrap", "explore"}:
+            return False
+        if self.config.adapter == "deepseek-harness":
+            return True
+        return state.resume_session and not self._failed_execute_session_unusable(result)
+
     def begin_session(self, task: WorkerTask, intent: Intent) -> dict[str, Any]:
         backend = self.backend_resolver(intent.project_id)
         workspace_root = backend.workspace_root.resolve()
@@ -485,6 +524,8 @@ class NativeAgentMind:
         directory.mkdir(parents=True, exist_ok=True)
         for child in ("evidence", "transcripts", "results", "sessions"):
             (directory / child).mkdir(parents=True, exist_ok=True)
+        if self.config.adapter == "deepseek-harness":
+            (directory / "dsh-home").mkdir(parents=True, exist_ok=True)
         (workspace_root / "shared").mkdir(parents=True, exist_ok=True)
         prepare_writable_path = getattr(backend, "prepare_writable_path", None)
         if callable(prepare_writable_path):
@@ -522,6 +563,8 @@ class NativeAgentMind:
                 turns=prior_turns,
                 resumed=False,
                 resume_session=False,
+                resume_requested=False,
+                resume_allowed=True,
                 status="active",
                 started_at=time.time(),
                 transcript_refs=[],
@@ -562,10 +605,13 @@ class NativeAgentMind:
             "worker_name": self.config.worker_name,
             "model": self.config.model,
             "session_scope": "task",
-            "resume_policy": "same_task_conclude_only",
+            "resume_policy": self._resume_policy,
+            "conclude_session_strategy": self._conclude_session_strategy,
             "session_id": state.session_id,
             "turns": state.turns,
             "resumed": state.resumed,
+            "resume_session": state.resume_session,
+            "resume_requested": state.resume_requested,
             "resume_allowed": state.resume_allowed,
             "recoverable": False,
             "status": state.status,
@@ -652,6 +698,7 @@ class NativeAgentMind:
         names = {
             "claude-code": ("CLAUDE_CONFIG_DIR", "HOME"),
             "codex-cli": ("CODEX_HOME", "HOME"),
+            "deepseek-harness": ("DSH_HOME",),
             "pi-cli": ("PI_CODING_AGENT_DIR",),
         }[self.config.adapter]
         for name in names:
@@ -992,7 +1039,12 @@ fi
         initial_error: Exception,
         transcript_refs: list[str],
     ) -> tuple[dict[str, Any], CompletionProposal | None, dict[str, int], list[str], float]:
-        """Resume one failed execute pass with a strict no-more-work conclude turn."""
+        """Run one strict, bounded conclude turn after a failed execute pass.
+
+        Codex/Claude/Pi reuse their task session. The patched DSH headless
+        runner receives the same task session ID and loads its persisted JSONL
+        history through ``agents.resume``.
+        """
 
         trigger = self._conclude_trigger(initial_result)
         initial_error_text = f"{type(initial_error).__name__}: {initial_error}"
@@ -1011,12 +1063,16 @@ fi
         state.fallback = {
             "used": True,
             "trigger": trigger,
+            "session_strategy": self._conclude_session_strategy,
             "initial_error": initial_error_text[:2200],
             "initial_transcript": initial_transcript,
             "recovered": False,
         }
         self._write_manifest(state)
         self._raise_if_cancelled(state, "before conclude fallback")
+        if self.config.adapter == "deepseek-harness":
+            state.resume_requested = True
+            self._write_manifest(state)
 
         conclude_started_at = now()
         conclude_result: CommandExecution | None = None
@@ -1209,10 +1265,10 @@ fi
                     # exits; conclude is reserved for timeout/parse fallback.
                     self._mark_session_unusable(state)
                     raise
-                # Resume the same native session for Cairn's bounded conclude
-                # pass whenever the CLI supplied a session ID.  Only explicit
-                # missing-session diagnostics make that second call futile.
-                if not state.resume_session or self._failed_execute_session_unusable(result):
+                # Enter Cairn's bounded conclude pass when the adapter can
+                # continue from its checkpoint. The patched DSH runner resumes
+                # the task-local JSONL session using Slime's fixed session ID.
+                if not self._can_run_conclude_fallback(state, task.mode, result):
                     self._mark_session_unusable(state)
                     raise
                 (
@@ -1623,6 +1679,60 @@ fi
                 *codex_argv,
             ]
 
+        if adapter == "deepseek-harness":
+            prompt_file = self._write_prompt_file(state, prompt)
+            patch_path = state.directory / "deepseek-harness.patch.yml"
+            patch_text = """- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: !!js process.env.DSH_MODEL
+- id: llm-deepseek
+  config:
+    reasoningEffort: !!js process.env.DSH_REASONING_EFFORT ?? 'high'
+- id: headless-runner
+  config:
+    task: !!js process.getBuiltinModule('fs').readFileSync(process.env.DSH_TASK_FILE, 'utf8')
+"""
+            temporary = patch_path.with_name(f"{patch_path.name}.{uuid4().hex}.tmp")
+            try:
+                with self._manifest_lock:
+                    temporary.write_text(patch_text, encoding="utf-8")
+                    temporary.replace(patch_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+            container_patch = f"{state.container_directory}/{patch_path.name}"
+            dsh_home = f"{state.container_directory}/dsh-home"
+            script = r'''dsh_home="$1"
+prompt_file="$2"
+session_id="$3"
+resume_session_id="$4"
+shift 4
+exec env \
+  DSH_HOME="$dsh_home" \
+  DSH_TASK_FILE="$prompt_file" \
+  DSH_SESSION_ID="$session_id" \
+  DSH_RESUME_SESSION_ID="$resume_session_id" \
+  DSH_PERMISSION_MODE="${DSH_PERMISSION_MODE:-danger-full-access}" \
+  DSH_TELEMETRY_MODE="${DSH_TELEMETRY_MODE:-DISABLED}" \
+  "$@"
+'''
+            return [
+                "/bin/sh",
+                "-lc",
+                script,
+                "--",
+                dsh_home,
+                prompt_file,
+                state.session_id,
+                state.session_id if state.resume_requested else "",
+                self.config.binary,
+                "--profile",
+                "headless",
+                "--patch",
+                container_patch,
+                "placeholder",
+            ]
+
         prompt_file = self._write_prompt_file(state, prompt)
         argv = [
             self.config.binary,
@@ -1773,7 +1883,9 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
 
         def record_session_id(value: Any) -> None:
             session_id = str(value or "").strip()
-            if session_id:
+            # DSH's headless runner owns the task-local ID supplied through
+            # DSH_SESSION_ID; never replace it with an internal event ID.
+            if session_id and state.resume_allowed and self.config.adapter != "deepseek-harness":
                 state.session_id = session_id
                 state.resume_session = True
 
@@ -1831,9 +1943,13 @@ exec env PI_CODING_AGENT_DIR="$agent_dir" "$@"
 
         if not messages:
             stripped = stdout.strip()
+            # DeepSeek Harness's headless runner can print the requested
+            # contract as a Markdown fenced JSON block instead of a JSONL
+            # assistant event.  Use Cairn's tolerant parser here so that
+            # valid structured output is not mistaken for a missing answer.
             try:
-                raw_report = json.loads(stripped)
-            except json.JSONDecodeError:
+                raw_report = parse_json_output(stripped)
+            except ValueError:
                 raw_report = None
             if isinstance(raw_report, dict) and any(
                 key in raw_report

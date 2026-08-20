@@ -17,7 +17,7 @@ Compose 将 `SLIME_DISPATCH_FILE` 指向的文件只读挂载到 Dispatcher 的 
 cp .env.example .env
 ```
 
-### 1.1 默认 Codex Worker
+### 1.1 共享模型配置
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
@@ -53,9 +53,9 @@ SLIME_LLM_MODEL=
 
 未解析到非空值时，Dispatcher 会拒绝启动对应 Worker。
 
-### 1.3 Pi 与 Claude
+### 1.3 Pi、Claude 与 DeepSeek Harness
 
-Pi 和 Claude 默认关闭。启用前先填写专用配置，再将 `dispatch.json` 中相应 Worker 的 `enabled` 改为 `true`。
+Pi 和 Claude 默认关闭。DeepSeek Harness 默认启用；其专用配置留空时会复用 `SLIME_CODEX_*`，需要独立网关或模型时再填写 `SLIME_DEEPSEEK_*`。
 
 ```dotenv
 SLIME_PI_BASE_URL=
@@ -65,16 +65,20 @@ SLIME_PI_MODEL=
 SLIME_CLAUDE_BASE_URL=
 SLIME_CLAUDE_API_KEY=
 SLIME_CLAUDE_MODEL=
+
+SLIME_DEEPSEEK_BASE_URL=
+SLIME_DEEPSEEK_API_KEY=
+SLIME_DEEPSEEK_MODEL=
 ```
 
-Pi 使用 OpenAI Chat Completions 兼容接口。Claude 使用 `ANTHROPIC_*` 环境变量，并将项目级配置目录放在 `/workspace/shared/agent-homes/claude`。
+Pi 使用配置的 OpenAI 兼容接口。Claude 使用 `ANTHROPIC_*` 环境变量，并将项目级配置目录放在 `/workspace/shared/agent-homes/claude`。DeepSeek Harness 使用原生 DeepSeek Chat Completions 协议；每个任务创建独立的 `DSH_HOME`，并在超时后的 conclude 阶段通过持久化 JSONL 会话恢复同一任务上下文。默认 Worker 配置将 `DSH_REASONING_EFFORT` 设为 `max`。
 
 ### 1.4 Compose 部署
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `SLIME_APP_IMAGE` | `ghcr.io/moumouhao12138-sketch/slime:0.0.37` | API/Dispatcher 共用镜像 |
-| `SLIME_WORKER_IMAGE` | `ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37` | 项目 Worker 镜像 |
+| `SLIME_APP_IMAGE` | `ghcr.io/moumouhao12138-sketch/slime:0.0.39` | API/Dispatcher 共用镜像 |
+| `SLIME_WORKER_IMAGE` | `ghcr.io/moumouhao12138-sketch/slime-worker:0.0.39` | 项目 Worker 镜像 |
 | `SLIME_BIND_ADDRESS` | `127.0.0.1` | API 监听地址 |
 | `SLIME_PORT` | `8000` | 宿主机端口 |
 | `SLIME_DISPATCH_FILE` | `./dispatch.json` | 挂载到 Dispatcher 的调度配置文件 |
@@ -95,6 +99,7 @@ Pi 使用 OpenAI Chat Completions 兼容接口。Claude 使用 `ANTHROPIC_*` 环
 | `SLIME_KALI_APT_MIRROR` | `http://http.kali.org/kali` |
 | `SLIME_KALI_APT_VERIFY_PEER` | `true` |
 | `SLIME_INSTALL_NATIVE_AGENTS` | `true` |
+| `SLIME_DEEPSEEK_HARNESS_VERSION` | `0.1.0-rc.7` |
 | `SLIME_INSTALL_REFERENCE_ASSETS` | `true` |
 
 ### 1.6 可选 Benchmark 集成
@@ -214,7 +219,7 @@ Worker 的其他固定运行属性：
 | `runtime.reason_batch_size` | `2` | 触发 Reason 的完成信号批量阈值 |
 | `runtime.reason_debounce_seconds` | `1` 秒 | Reason 信号合并等待 |
 | `runtime.state_heartbeat_interval` | `2` 秒 | 运行态持久化心跳 |
-| `runtime.worker_healthcheck` | `disabled` | 模型端点健康检查模式；任务失败仍会记录上游错误 |
+| `runtime.worker_healthcheck` | `startup_and_task` | Dispatcher 启动和每次任务前检查模型端点 |
 | `runtime.healthcheck_timeout` | `60` 秒 | 健康检查超时 |
 
 `worker_healthcheck` 可选：
@@ -299,9 +304,10 @@ Worker 的其他固定运行属性：
 
 | 名称 | 类型 | 默认状态 | 任务类型 | `max_running` |
 |---|---|---|---|---:|
-| `codex-native` | Codex | 启用 | bootstrap/explore/reason | `8` |
+| `codex-native` | Codex | 关闭 | bootstrap/explore/reason | `8` |
 | `pi-native` | Pi | 关闭 | bootstrap/explore/reason | `4` |
 | `claude-native` | Claude Code | 关闭 | bootstrap/explore/reason | `2` |
+| `deepseek-harness-native` | DeepSeek Harness | 启用 | bootstrap/explore/reason | `8` |
 
 Worker 条目示例：
 

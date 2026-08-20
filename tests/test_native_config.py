@@ -52,7 +52,7 @@ class NativeDispatchConfigTests(unittest.TestCase):
         )
         return path
 
-    def test_loads_three_direct_container_cli_workers(self):
+    def test_loads_four_direct_container_cli_workers(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = self.write_config(
                 Path(temporary),
@@ -75,6 +75,12 @@ class NativeDispatchConfigTests(unittest.TestCase):
                         "execution": "native-agent",
                         "task_types": ["reason"],
                     },
+                    {
+                        "name": "deepseek-reason",
+                        "type": "dsh",
+                        "execution": "native-agent",
+                        "task_types": ["reason"],
+                    },
                 ],
             )
             _, pool = load_dispatch_config(path, lambda project_id: object())
@@ -83,6 +89,11 @@ class NativeDispatchConfigTests(unittest.TestCase):
             self.assertIsInstance(pool.get("claude-bootstrap").mind, NativeAgentMind)
             self.assertEqual(pool.get("codex-explore").mind.config.binary, "codex")
             self.assertEqual(pool.get("pi-reason").mind.config.adapter, "pi-cli")
+            self.assertEqual(pool.get("deepseek-reason").mind.config.binary, "dsh")
+            self.assertEqual(
+                pool.get("deepseek-reason").mind.config.adapter,
+                "deepseek-harness",
+            )
 
     def test_default_config_uses_a_general_capability_pool(self):
         root = Path(__file__).parents[1]
@@ -90,12 +101,21 @@ class NativeDispatchConfigTests(unittest.TestCase):
 
         workers = payload["workers"]
         expected = {"bootstrap", "explore", "reason"}
-        self.assertEqual({worker["name"] for worker in workers}, {"claude-native", "codex-native", "pi-native"})
+        self.assertEqual(
+            {worker["name"] for worker in workers},
+            {
+                "claude-native",
+                "codex-native",
+                "deepseek-harness-native",
+                "pi-native",
+            },
+        )
         self.assertTrue(all(set(worker["task_types"]) == expected for worker in workers))
         enabled = {worker["name"]: worker.get("enabled", True) for worker in workers}
-        self.assertTrue(enabled["codex-native"])
-        self.assertTrue(enabled["pi-native"])
+        self.assertFalse(enabled["codex-native"])
+        self.assertFalse(enabled["pi-native"])
         self.assertFalse(enabled["claude-native"])
+        self.assertTrue(enabled["deepseek-harness-native"])
         claude = next(worker for worker in workers if worker["name"] == "claude-native")
         self.assertEqual(claude["max_running"], 2)
         self.assertEqual(claude["priority"], 0)
@@ -138,6 +158,64 @@ class NativeDispatchConfigTests(unittest.TestCase):
             "${SLIME_PI_API_KEY|SLIME_CODEX_API_KEY|SLIME_LLM_API_KEY}",
         )
         self.assertEqual(pi["env"]["PI_PROVIDER_API"], "openai-responses")
+        deepseek = next(
+            worker for worker in workers if worker["name"] == "deepseek-harness-native"
+        )
+        self.assertEqual(deepseek["type"], "deepseek-harness")
+        self.assertEqual(
+            deepseek["env"]["DSH_MODEL"],
+            "${SLIME_DEEPSEEK_MODEL|SLIME_CODEX_MODEL|SLIME_LLM_MODEL}",
+        )
+        self.assertEqual(deepseek["env"]["DSH_REASONING_EFFORT"], "max")
+        self.assertEqual(
+            deepseek["env"]["DEEPSEEK_BASE_URL"],
+            "${SLIME_DEEPSEEK_BASE_URL|SLIME_CODEX_BASE_URL|SLIME_LLM_BASE_URL}",
+        )
+        self.assertEqual(
+            deepseek["env"]["DEEPSEEK_API_KEY"],
+            "${SLIME_DEEPSEEK_API_KEY|SLIME_CODEX_API_KEY|SLIME_LLM_API_KEY}",
+        )
+        self.assertEqual(deepseek["env"]["DSH_PERMISSION_MODE"], "danger-full-access")
+        self.assertEqual(deepseek["env"]["DSH_TELEMETRY_MODE"], "DISABLED")
+
+    def test_cairn_explicit_deepseek_env_builds_chat_completions_endpoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.write_config(
+                Path(temporary),
+                [
+                    {
+                        "name": "deepseek-explicit",
+                        "type": "deepseek",
+                        "execution": "native-agent",
+                        "task_types": ["bootstrap", "explore", "reason"],
+                        "env": {
+                            "DSH_MODEL": "${TEST_DEEPSEEK_MODEL}",
+                            "DEEPSEEK_BASE_URL": "${TEST_DEEPSEEK_BASE_URL}",
+                            "DEEPSEEK_API_KEY": "${TEST_DEEPSEEK_API_KEY}",
+                        },
+                    }
+                ],
+            )
+            environment = {
+                "TEST_DEEPSEEK_MODEL": "deepseek-v4-flash",
+                "TEST_DEEPSEEK_BASE_URL": "https://models.example/v1",
+                "TEST_DEEPSEEK_API_KEY": "deepseek-secret-key",
+            }
+            with patch.dict("os.environ", environment, clear=True):
+                _, pool = load_dispatch_config(path, lambda project_id: object())
+
+            native = pool.get("deepseek-explicit").mind.config
+            self.assertEqual(native.adapter, "deepseek-harness")
+            self.assertEqual(native.binary, "dsh")
+            self.assertEqual(native.model, "deepseek-v4-flash")
+            self.assertEqual(native.provider, "deepseek-official")
+            self.assertEqual(
+                native.environment["DEEPSEEK_API_KEY"],
+                "deepseek-secret-key",
+            )
+            self.assertEqual(native.model_endpoint.base_url, "https://models.example/v1")
+            self.assertEqual(native.model_endpoint.protocol, "openai-chat-completions")
+            self.assertNotIn("deepseek-secret-key", repr(native.model_endpoint))
 
     def test_prompt_group_is_loaded_and_propagated_to_native_workers(self):
         with tempfile.TemporaryDirectory() as temporary:

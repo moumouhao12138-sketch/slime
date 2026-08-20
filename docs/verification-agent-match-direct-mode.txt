@@ -1,0 +1,95 @@
+Agent Match direct startup mode verification
+Date: 2026-08-19 UTC
+
+Scope
+  Change newly activated Agent Match projects from the legacy growth path to
+  explicit Cairn direct startup. The platform controller now persists:
+  start_mode=direct
+  bootstrap_enabled=true
+  This starts Bootstrap first; Bootstrap may complete directly when it has
+  sufficient verified evidence, otherwise scheduling continues to Reason and
+  Explore.
+
+Preserved baseline SHA-256
+  docs/USER_GUIDE.md
+  5b68378c9bbb8f0aa27b32615f63d83b042b16df103c87ea307900571242bc33
+  src/slime_cairn/integrations/agent_match/runtime.py
+  3bb9e09549734712c006d3054af82a18e6d8d4985e62a426b7c7c2e786074c43
+  tests/test_agent_match_integration.py (working-tree state before this change)
+  a6f1a8e838960f585b6486b667a8e1d47a52cea56a948e403c024b888a59da55
+
+Modified SHA-256
+  docs/USER_GUIDE.md
+  19c2b96369fb41cbc21b89cc86e38a5f0ad91c5af3eab1b7c42bd9a0c4c0183d
+  src/slime_cairn/integrations/agent_match/runtime.py
+  b92dcf481123790cde866719ee034b77d68128bdb4c100dfc13c652af65ac7f5
+  tests/test_agent_match_integration.py
+  b07789e24bde16e5ae044b3318a355eb2c5e5d35451ac531213f00a8852c3fc9
+
+Patch artifact
+  docs/agent-match-direct-mode.patch
+
+Patch validation command
+  git apply --reverse --check docs/agent-match-direct-mode.patch
+  git diff --check
+
+Patch validation literal result
+  no output
+  exit status: 0
+
+Integration and startup regression command
+  docker run --rm -e PYTHONPATH=/app/src \
+    -v ${REPO_ROOT}:/app -w /app slime-local:0.0.37 \
+    python -m unittest \
+      tests.test_agent_match_integration \
+      tests.test_project_start_modes \
+      tests.test_optional_bootstrap \
+      tests.test_cairn_runtime
+
+Integration and startup regression literal result
+  Ran 26 tests in 46.919s
+  OK
+  exit status: 0
+
+Rollback rehearsal
+  The patch was applied to a detached worktree at git HEAD. All seven Agent
+  Match integration tests passed, then the patch was applied in reverse.
+  Literal result: rollback_worktree_clean=true
+
+Deployment baseline image
+  slime-local:0.0.37-before-agent-match-direct
+  sha256:56287b8e503d63b05d3d5946062820dafec0b44a70345cd33a644fa15bd5b1b0
+
+Modified application image
+  slime-local:0.0.37
+  sha256:c8d98d08596886c7a5c6473202e7fab18375dab6fed65f0718b598c61883b80d
+
+Deployment command
+  docker compose up -d --no-deps --no-build --force-recreate api
+
+Deployment literal result
+  API: {"ok":true,"version":"0.0.37"}
+  API container image:
+  sha256:c8d98d08596886c7a5c6473202e7fab18375dab6fed65f0718b598c61883b80d
+  The immediate API-only deployment check showed the Dispatcher and both
+  active non-platform project Workers retaining their original container IDs.
+  A concurrent Compose reconciliation later recreated the Dispatcher on the
+  same modified application image. Its startup health checks passed and both
+  projects were registered again. The two project Worker container IDs stayed
+  unchanged throughout; no project restart was issued by this deployment.
+
+Runtime source verification
+  /app/src/slime_cairn/integrations/agent_match/runtime.py in the API container
+  contains literal start_mode=direct and bootstrap_enabled=true fields.
+  Executing the controller's scope builder in that container printed:
+  start_mode=direct
+  bootstrap_enabled=true
+
+Rollback
+  scripts/rollback-agent-match-direct-mode.sh
+  The script reverses the fixed source patch. When the preserved Docker image
+  exists, it also retags that image and recreates only the API service.
+
+Historical state
+  Existing completed Agent Match projects retain their recorded historical
+  scope. Newly started or reactivated platform exercises receive direct mode.

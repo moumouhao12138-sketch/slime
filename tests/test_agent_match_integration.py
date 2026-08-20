@@ -152,7 +152,11 @@ class AgentMatchIntegrationTests(unittest.TestCase):
         started = self.controller.start(1001)
         project_id = started["project"]["id"]
         project = self.board.get_project(project_id)
-        self.assertFalse(project.scope["bootstrap_enabled"])
+        self.assertEqual(project.scope["start_mode"], "hybrid")
+        self.assertTrue(project.scope["bootstrap_enabled"])
+        self.assertEqual(Scheduler._start_mode(project), "hybrid")
+        self.assertTrue(Scheduler._hybrid_bootstrap(project, "bootstrap"))
+        self.assertFalse(Scheduler._hybrid_bootstrap(project, "explore"))
         self.assertEqual(project.target, "198.51.100.10:30080")
         self.assertTrue(project.scope["submission"]["managed"])
         self.assertEqual(project.scope["submission"]["platform"], "agent_match")
@@ -314,6 +318,18 @@ class AgentMatchIntegrationTests(unittest.TestCase):
                 "openai-responses",
                 {**environment, "SLIME_CODEX_UPSTREAM_ENDPOINT": "https://example.com/responses"},
             )
+
+        validate_competition_model_route(
+            "deepseek-harness",
+            "https://platform.fixture/llm-gateway/proxy/e/deepseek",
+            "openai-chat-completions",
+            {
+                "SLIME_COMPETITION_GATEWAY_ONLY": "true",
+                "SLIME_DEEPSEEK_UPSTREAM_ENDPOINT": (
+                    "https://api.deepseek.com/chat/completions"
+                ),
+            },
+        )
 
 
 if __name__ == "__main__":
