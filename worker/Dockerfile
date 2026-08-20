@@ -1,7 +1,7 @@
 ARG BASE_IMAGE=kalilinux/kali-rolling
 FROM ${BASE_IMAGE}
 
-ARG KALI_APT_MIRROR=http://http.kali.org/kali
+ARG KALI_APT_MIRROR=http://kali.download/kali
 ARG KALI_APT_VERIFY_PEER=true
 ARG INSTALL_NATIVE_AGENTS=true
 ARG INSTALL_REFERENCE_ASSETS=true
@@ -9,6 +9,9 @@ ARG CODEX_VERSION=0.144.6
 ARG CLAUDE_CODE_VERSION=2.1.112
 ARG PI_AGENT_VERSION=0.73.1
 ARG DEEPSEEK_HARNESS_VERSION=0.1.0-rc.7
+ARG PWNTOOLS_VERSION=4.15.0
+ARG PYMONGO_VERSION=4.17.0
+ARG UNICORN_VERSION=2.1.2
 
 # HTTP_PROXY, HTTPS_PROXY, and NO_PROXY are intentionally left as Docker's
 # predefined build arguments so proxy credentials stay out of image history.
@@ -32,7 +35,7 @@ RUN --mount=type=cache,id=slime-cairn-apt-archives,target=/var/cache/apt/archive
         ca-certificates curl wget git ripgrep fd-find file binutils openssl \
         python3 python3-pip python3-venv nodejs sudo tmux procps \
         iproute2 net-tools dnsutils netcat-openbsd socat proxychains4 \
-        unzip p7zip-full make gcc gdb gdbserver checksec strace ltrace \
+        unzip p7zip-full build-essential cmake pkg-config gdb gdbserver checksec strace ltrace \
         nmap masscan sqlmap hydra john hashcat smbclient redis-tools \
         postgresql-client whois ffuf feroxbuster gobuster nuclei \
     && apt-get clean \
@@ -46,8 +49,15 @@ RUN groupadd --gid 1000 kali \
 COPY scripts/fetch_reference_asset.sh /usr/local/bin/fetch_reference_asset
 COPY scripts/patch_deepseek_harness.py /usr/local/bin/patch_deepseek_harness.py
 
-RUN chmod +x /usr/local/bin/fetch_reference_asset \
-    && pip3 install --break-system-packages pwntools pymongo
+RUN chmod +x /usr/local/bin/fetch_reference_asset
+
+RUN --mount=type=cache,id=slime-worker-pip,target=/root/.cache/pip,sharing=locked \
+    pip3 install --break-system-packages \
+        --disable-pip-version-check --no-input --retries 5 --timeout 120 \
+        "unicorn==${UNICORN_VERSION}" \
+        "pwntools==${PWNTOOLS_VERSION}" \
+        "pymongo==${PYMONGO_VERSION}" \
+    && TERM=xterm python3 -c "import importlib.metadata as metadata, pwn, pymongo, unicorn; assert metadata.version('pwntools') == '${PWNTOOLS_VERSION}'; assert pymongo.version == '${PYMONGO_VERSION}'; assert unicorn.__version__ == '${UNICORN_VERSION}'"
 
 RUN --mount=type=cache,id=slime-worker-npm,target=/root/.npm,sharing=locked \
     if [ "${INSTALL_NATIVE_AGENTS}" = "true" ]; then \

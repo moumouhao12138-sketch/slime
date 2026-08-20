@@ -77,8 +77,8 @@ Pi 使用配置的 OpenAI 兼容接口。Claude 使用 `ANTHROPIC_*` 环境变�
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `SLIME_APP_IMAGE` | `ghcr.io/moumouhao12138-sketch/slime:0.0.40` | API/Dispatcher 共用镜像 |
-| `SLIME_WORKER_IMAGE` | `ghcr.io/moumouhao12138-sketch/slime-worker:0.0.40` | 项目 Worker 镜像 |
+| `SLIME_APP_IMAGE` | `ghcr.io/moumouhao12138-sketch/slime:0.0.41` | API/Dispatcher 共用镜像 |
+| `SLIME_WORKER_IMAGE` | `ghcr.io/moumouhao12138-sketch/slime-worker:0.0.41` | 项目 Worker 镜像 |
 | `SLIME_BIND_ADDRESS` | `127.0.0.1` | API 监听地址 |
 | `SLIME_PORT` | `8000` | 宿主机端口 |
 | `SLIME_DISPATCH_FILE` | `./dispatch.json` | 挂载到 Dispatcher 的调度配置文件 |
@@ -96,7 +96,7 @@ Pi 使用配置的 OpenAI 兼容接口。Claude 使用 `ANTHROPIC_*` 环境变�
 | `SLIME_PYTHON_IMAGE` | `python:3.13-slim` |
 | `SLIME_DOCKER_CLI_IMAGE` | `docker:29-cli` |
 | `SLIME_WORKER_BASE_IMAGE` | `kalilinux/kali-rolling` |
-| `SLIME_KALI_APT_MIRROR` | `http://http.kali.org/kali` |
+| `SLIME_KALI_APT_MIRROR` | `http://kali.download/kali` |
 | `SLIME_KALI_APT_VERIFY_PEER` | `true` |
 | `SLIME_INSTALL_NATIVE_AGENTS` | `true` |
 | `SLIME_DEEPSEEK_HARNESS_VERSION` | `0.1.0-rc.7` |

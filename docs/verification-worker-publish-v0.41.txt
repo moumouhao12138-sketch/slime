@@ -1,0 +1,62 @@
+Worker publish repair verification
+Date: 2026-08-20 UTC
+
+Failure reproduced from the previous remote run
+  Failed step:
+    pip3 install --break-system-packages pwntools pymongo
+  Literal error:
+    error: [Errno 2] No such file or directory: 'cmake'
+    Python 3.14 had no compatible Unicorn wheel and pip selected a source build.
+
+Modified artifact
+  worker/Dockerfile
+  Adds build-essential, cmake, and pkg-config.
+  Pins pwntools=4.15.0, pymongo=4.17.0, unicorn=2.1.2.
+  Runs import and version assertions during image construction.
+
+Mirror change
+  Default and workflow Kali mirror:
+    http://kali.download/kali
+  The endpoint returned Kali InRelease and package indexes during validation.
+
+Static validation
+  Command:
+    docker buildx build --check --progress=plain worker
+  Literal result:
+    Check complete, no warnings found.
+    exit status: 0
+
+Focused source validation
+  Command:
+    PYTHONPATH=src python3 -m unittest tests.test_worker_dockerfile
+  Literal result:
+    Ran 2 tests
+    OK
+    exit status: 0
+
+Python 3.14 clean-room dependency validation
+  Environment:
+    python:3.14-slim
+  Commands:
+    apt-get install -y --no-install-recommends build-essential cmake pkg-config
+    python -m pip install --no-cache-dir unicorn==2.1.2 pwntools==4.15.0 pymongo==4.17.0
+    python -c 'import unicorn, pwn, pymongo; assert unicorn.__version__ == "2.1.2"; assert pwn.version == "4.15.0"; assert pymongo.version == "4.17.0"'
+  Literal result:
+    Successfully built unicorn
+    Successfully installed ... pwntools-4.15.0 ... pymongo-4.17.0 ... unicorn-2.1.2
+    PYTHON 3.14.7
+    unicorn 2.1.2
+    pwntools 4.15.0
+    pymongo 4.17.0
+    exit status: 0
+
+Compose validation
+  Command:
+    docker compose config --quiet
+  exit status: 0
+
+Remote publish
+  Triggered by tag: slime.v0.41
+  Expected images:
+    ghcr.io/moumouhao12138-sketch/slime:0.0.41
+    ghcr.io/moumouhao12138-sketch/slime-worker:0.0.41

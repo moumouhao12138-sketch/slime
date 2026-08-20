@@ -1,0 +1,35 @@
+diff --git a/.github/workflows/publish-images.yml b/.github/workflows/publish-images.yml
+index eea5b72..3cdc497 100644
+--- a/.github/workflows/publish-images.yml
++++ b/.github/workflows/publish-images.yml
+@@ -13 +13 @@ on:
+-        default: "0.0.40"
++        default: "0.0.41"
+@@ -97,0 +98 @@ jobs:
++            KALI_APT_MIRROR=http://kali.download/kali
+diff --git a/worker/Dockerfile b/worker/Dockerfile
+index af66762..b54e61e 100644
+--- a/worker/Dockerfile
++++ b/worker/Dockerfile
+@@ -4 +4 @@ FROM ${BASE_IMAGE}
+-ARG KALI_APT_MIRROR=http://http.kali.org/kali
++ARG KALI_APT_MIRROR=http://kali.download/kali
+@@ -11,0 +12,3 @@ ARG DEEPSEEK_HARNESS_VERSION=0.1.0-rc.7
++ARG PWNTOOLS_VERSION=4.15.0
++ARG PYMONGO_VERSION=4.17.0
++ARG UNICORN_VERSION=2.1.2
+@@ -35 +38 @@ RUN --mount=type=cache,id=slime-cairn-apt-archives,target=/var/cache/apt/archive
+-        unzip p7zip-full make gcc gdb gdbserver checksec strace ltrace \
++        unzip p7zip-full build-essential cmake pkg-config gdb gdbserver checksec strace ltrace \
+@@ -49,2 +52,9 @@ COPY scripts/patch_deepseek_harness.py /usr/local/bin/patch_deepseek_harness.py
+-RUN chmod +x /usr/local/bin/fetch_reference_asset \
+-    && pip3 install --break-system-packages pwntools pymongo
++RUN chmod +x /usr/local/bin/fetch_reference_asset
++
++RUN --mount=type=cache,id=slime-worker-pip,target=/root/.cache/pip,sharing=locked \
++    pip3 install --break-system-packages \
++        --disable-pip-version-check --no-input --retries 5 --timeout 120 \
++        "unicorn==${UNICORN_VERSION}" \
++        "pwntools==${PWNTOOLS_VERSION}" \
++        "pymongo==${PYMONGO_VERSION}" \
++    && TERM=xterm python3 -c "import importlib.metadata as metadata, pwn, pymongo, unicorn; assert metadata.version('pwntools') == '${PWNTOOLS_VERSION}'; assert pymongo.version == '${PYMONGO_VERSION}'; assert unicorn.__version__ == '${UNICORN_VERSION}'"

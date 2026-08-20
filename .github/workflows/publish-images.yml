@@ -10,7 +10,7 @@ on:
       tag:
         description: Container image tag
         required: true
-        default: "0.0.40"
+        default: "0.0.41"
         type: string
 
 permissions:
@@ -95,6 +95,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
+            KALI_APT_MIRROR=http://kali.download/kali
             HTTP_PROXY=${{ secrets.BUILD_HTTP_PROXY }}
             HTTPS_PROXY=${{ secrets.BUILD_HTTPS_PROXY }}
             NO_PROXY=${{ secrets.BUILD_NO_PROXY }}

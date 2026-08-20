@@ -15,8 +15,8 @@
 应用与 Worker 使用两个独立镜像：
 
 ```text
-ghcr.io/moumouhao12138-sketch/slime:0.0.40
-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.40
+ghcr.io/moumouhao12138-sketch/slime:0.0.41
+ghcr.io/moumouhao12138-sketch/slime-worker:0.0.41
 ```
 
 Dispatcher 挂载 `/var/run/docker.sock`。因此运行 Dispatcher 的身份具有管理该 Docker Engine 的能力，部署主机应只允许受信任的管理员访问。
@@ -133,7 +133,7 @@ Health   http://127.0.0.1:8000/health
 | `SLIME_PYTHON_IMAGE` | `python:3.13-slim` | 应用镜像基础环境 |
 | `SLIME_DOCKER_CLI_IMAGE` | `docker:29-cli` | 注入应用镜像的 Docker CLI |
 | `SLIME_WORKER_BASE_IMAGE` | `kalilinux/kali-rolling` | Worker 基础镜像 |
-| `SLIME_KALI_APT_MIRROR` | Kali 官方镜像 | Worker 软件源 |
+| `SLIME_KALI_APT_MIRROR` | `http://kali.download/kali` | Worker 软件源 |
 | `SLIME_INSTALL_NATIVE_AGENTS` | `true` | 安装 Codex、Claude、Pi 和 DeepSeek Harness CLI |
 | `SLIME_DEEPSEEK_HARNESS_VERSION` | `0.1.0-rc.7` | DeepSeek Harness CLI 版本 |
 | `SLIME_INSTALL_REFERENCE_ASSETS` | `true` | 构建时下载 Cairn 的 PoC、工具和知识库 |
@@ -153,8 +153,8 @@ Worker 镜像体积较大，首次构建需要较长时间和稳定网络。
 升级前建议备份两个数据卷。回滚时，将 `.env` 中的镜像标签改回已验证版本，再执行相同命令：
 
 ```dotenv
-SLIME_APP_IMAGE=ghcr.io/moumouhao12138-sketch/slime:0.0.39
-SLIME_WORKER_IMAGE=ghcr.io/moumouhao12138-sketch/slime-worker:0.0.39
+SLIME_APP_IMAGE=ghcr.io/moumouhao12138-sketch/slime:0.0.40
+SLIME_WORKER_IMAGE=ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37
 ```
 
 当 Worker 镜像引用或镜像 ID 变化时，Dispatcher 会按需重建项目 Worker 容器；项目 workspace 保存在独立数据卷中。
