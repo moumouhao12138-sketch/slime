@@ -99,15 +99,15 @@ Deployment
     docker compose up -d --no-deps --no-build --force-recreate api
   Result:
     API /health: {"ok":true,"version":"0.0.37"}
-    API container: d19f3e423726c8077018dfc327c5aa88fac518fb4b8f11eb38ddbc23771c673e
+    API container: <API_CONTAINER_ID>
     API health: healthy
     Runtime scope check: start_mode=hybrid, bootstrap_enabled=true
     Dispatcher container before/after:
-      25e45936116d38be107fc9c652fd7f110551e0ca0ef25f18263971d2a992b298
-      25e45936116d38be107fc9c652fd7f110551e0ca0ef25f18263971d2a992b298
+      <DISPATCHER_CONTAINER_ID_BEFORE>
+      <DISPATCHER_CONTAINER_ID_AFTER>
     Existing project Worker before/after:
-      120cf3f102d449917fa6f7ae414839b1cc591167617c3e7cdbb927e7e39d51fc
-      120cf3f102d449917fa6f7ae414839b1cc591167617c3e7cdbb927e7e39d51fc
+      <WORKER_CONTAINER_ID_BEFORE>
+      <WORKER_CONTAINER_ID_AFTER>
     exit status: 0
 
 Rollback

@@ -1,0 +1,42 @@
+Application image Node.js verification
+Date: 2026-08-20 UTC
+
+Baseline artifact
+  Dockerfile sha256: 370e41cf4130f80ecabd40a2d122a8a485b44a77df7647eaffc01f292fb4829e
+
+Modified artifact
+  Dockerfile sha256: 69c549a293f3473af905b1b13230f1b112e94b6eadcc8a66ea2136f52f3125e5
+  Dockerfile installs Debian's `nodejs` package before the application wheel,
+  enables noninteractive apt behavior, and uses five apt download retries.
+
+Build command
+  docker build --pull=false --progress=plain -t slime-local:0.0.40-node .
+
+Build literal result
+  nodejs package: 20.19.2+dfsg-1+deb13u2
+  image id: sha256:3cccbb30929586ddcf592096e75aee926b0c1c0a1b9fa0cb0772aa95afc4b01c
+  application version: 0.0.40
+  exit status: 0
+
+Runtime checks
+  docker run --rm slime-local:0.0.40-node node --version
+  v20.19.2
+  exit status: 0
+
+Full test command
+  docker run --rm -v "$PWD:/app" -w /app -e PYTHONPATH=/app/src \
+    slime-local:0.0.40-node python3 -m unittest discover -s tests -p 'test_*.py'
+
+Full test literal result
+  Ran 250 tests in 102.426s
+  OK
+  exit status: 0
+
+Static UI check
+  The inline JavaScript test now finds `/usr/bin/node` in the application image;
+  the complete suite passed without the previous Node.js-only failure.
+
+Rollback
+  Patch: docs/application-node-v0.40.patch
+  Script: scripts/rollback-application-node-v0.40.sh
+  Forward and reverse patch checks were rehearsed in a detached temporary tree.

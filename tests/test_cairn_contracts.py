@@ -102,7 +102,7 @@ class CairnContractsTests(unittest.TestCase):
                 "description": "confirmed two exact benchmark values",
                 "submissions": [
                     " TOKEN-42 ",
-                    "88341566-f0b6-4b1a-bde8-e45ba8ed52f8",
+                    "fixture-candidate-with-dashes",
                     "TOKEN-42",
                 ],
             },
@@ -110,7 +110,7 @@ class CairnContractsTests(unittest.TestCase):
 
         self.assertEqual(
             extract_explore_submissions(payload),
-            ["TOKEN-42", "88341566-f0b6-4b1a-bde8-e45ba8ed52f8"],
+            ["TOKEN-42", "fixture-candidate-with-dashes"],
         )
 
     def test_explore_rejects_non_contract_planning_text(self) -> None:

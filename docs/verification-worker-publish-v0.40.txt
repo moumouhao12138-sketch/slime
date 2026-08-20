@@ -1,0 +1,92 @@
+Worker publish-layer repair verification
+Date: 2026-08-20 UTC
+
+Scope
+  Split the Worker Python and npm installation transactions, isolate DeepSeek
+  Harness installation, add a BuildKit npm cache and bounded registry retries,
+  and expose optional predefined proxy build arguments without storing proxy
+  credentials in image history.
+
+Baseline artifacts
+  worker/Dockerfile
+    sha256: ef5e6d3cef453ae4886d1b802e9afda1c3ab816a1b4a0273a0c44591b4685cf2
+  .github/workflows/publish-images.yml
+    sha256: c360e8a471cbbb3d1de37224a52b451322a97e6270595707435e1e369ad67f2a
+
+Baseline remote build result
+  Command represented by the failed publish job:
+    pip3 install ... && npm install -g codex claude pi dsh && npm install -g playwright-cli
+  Literal result:
+    buildx failed with exit code 1 in the combined install layer
+
+Modified artifacts
+  worker/Dockerfile
+    sha256: cd38286de98e0f980f3ea5e446f7418059dad9385c68fcd64378cb158069591e
+  .github/workflows/publish-images.yml
+    sha256: 2c88402aed3b1256694ec6d7fd8847ec4e390e8edf8081fdc875ddf82fef72cc
+
+Worker Dockerfile validation
+  Command:
+    docker buildx build --check --progress=plain worker
+  Literal result:
+    Check complete, no warnings found.
+    exit status: 0
+
+Independent npm transaction validation
+  Commands:
+    npm install -g --no-audit --no-fund \
+      @openai/codex@0.144.6 @anthropic-ai/claude-code@2.1.112 \
+      @mariozechner/pi-coding-agent@0.73.1
+    npm install -g --no-audit --no-fund @deepseek-ai/dsh@0.1.0-rc.7
+    dsh --version
+  Literal results:
+    added 193 packages in 2m
+    added 451 packages in 5m
+    0.1.0-rc.7
+    WORKER_NPM_LAYERS_OK
+
+Application image validation
+  Command:
+    docker build --progress=plain -t slime-local:0.0.40 .
+  Literal result:
+    slime-cairn-0.0.40 installed
+    image id: sha256:c11835739846baab9c5fa5a4f86cfd969071b3d2ce692cb991fa1fb57e36b4d4
+    exit status: 0
+
+Source test command
+  docker run --rm -v "$PWD:/app" -w /app -e PYTHONPATH=/app/src \
+    slime-local:0.0.40 python3 -m unittest discover -s tests -p 'test_*.py'
+
+Source test literal result
+  Ran 250 tests in 101.520s
+  FAILED (failures=1)
+  The only failure was test_inline_javascript_parses_with_node because the
+  application runtime image intentionally has no Node.js. The same extracted
+  inline script was checked in the Worker image:
+    static_ui_syntax_ok
+    exit status: 0
+  All remaining 249 tests passed.
+
+Focused DeepSeek/native test command
+  python3 -m unittest tests.test_cairn_contracts \
+    tests.test_deepseek_harness_patch tests.test_native_config \
+    tests.test_native_session_recovery tests.test_worker_tool_manifest
+
+Focused test literal result
+  Ran 46 tests in 0.250s
+  OK
+  exit status: 0
+
+Release-content checks
+  Docker Compose configuration: exit status 0
+  Dockerfile build check: exit status 0
+  tracked-source secret scan: leak_count 0
+  local challenge attachment: ignored and not tracked
+  source archive: no attachment, runtime database, session, or workspace paths
+
+Patch and rollback
+  Patch: docs/worker-publish-v0.40.patch
+  Rollback: scripts/rollback-worker-publish-v0.40.sh
+  Forward apply check: git apply --unidiff-zero --check; exit status 0
+  Reverse apply check: git apply --unidiff-zero --reverse --check; exit status 0
+  Detached rollback rehearsal: Worker publish-layer changes rolled back; exit status 0

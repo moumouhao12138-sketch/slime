@@ -2,7 +2,7 @@
 
 Slime Cairn 是一个持久化、多项目的 Agent 探索运行时。系统以 Blackboard 保存事实、假设、分支、证据和执行历史，由 Dispatcher 调度 `Bootstrap`、`Explore`、`Reason` 三类任务，并为每个项目维护独立的 Docker Worker 容器与 workspace。
 
-当前版本：`0.0.39`
+当前版本：`0.0.40`
 
 ## 主要特性
 
@@ -42,7 +42,7 @@ Docker Compose 管理三个服务：
 | `dispatcher` | 调度、租约、Worker 容器管理 | 常驻 |
 | `worker-image` | 拉取或准备 Worker 镜像 | 一次性，退出码 `0` 表示正常 |
 
-默认应用镜像为 `ghcr.io/moumouhao12138-sketch/slime:0.0.39`，默认 Worker 镜像为 `ghcr.io/moumouhao12138-sketch/slime-worker:0.0.39`。
+默认应用镜像为 `ghcr.io/moumouhao12138-sketch/slime:0.0.40`，默认 Worker 镜像为 `ghcr.io/moumouhao12138-sketch/slime-worker:0.0.40`。
 
 完成比赛题目后，系统会把同一赛事的所有已完成题目交给独立的 `writeup-worker` 生成一份中文团队 WP。它只读取 Blackboard 中已确认的事实、完成记录和项目工作区脚本，不参与做题、提交答案或创建 Intent；生成失败时保留现有草稿，并在 Writeup 面板显示失败原因。模型端点沿用 `SLIME_CODEX_*` 配置，也可用 `SLIME_WRITEUP_*` 单独配置。
 

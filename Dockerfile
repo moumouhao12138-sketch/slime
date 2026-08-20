@@ -12,6 +12,7 @@ LABEL org.opencontainers.image.title="Slime Cairn" \
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
     SLIME_PROJECT_ROOT=/app
 
 WORKDIR /app
@@ -20,6 +21,11 @@ WORKDIR /app
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY pyproject.toml README.md dispatch.json ./
 COPY src ./src
+
+RUN apt-get update -o Acquire::Retries=5 \
+    && apt-get install -y --no-install-recommends -o Acquire::Retries=5 nodejs \
+    && node --version \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN python -m pip install --no-cache-dir . \
     && python -m compileall -q /app/src

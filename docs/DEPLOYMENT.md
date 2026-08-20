@@ -15,8 +15,8 @@
 应用与 Worker 使用两个独立镜像：
 
 ```text
-ghcr.io/moumouhao12138-sketch/slime:0.0.39
-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.39
+ghcr.io/moumouhao12138-sketch/slime:0.0.40
+ghcr.io/moumouhao12138-sketch/slime-worker:0.0.40
 ```
 
 Dispatcher 挂载 `/var/run/docker.sock`。因此运行 Dispatcher 的身份具有管理该 Docker Engine 的能力，部署主机应只允许受信任的管理员访问。

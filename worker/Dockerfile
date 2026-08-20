@@ -10,6 +10,9 @@ ARG CLAUDE_CODE_VERSION=2.1.112
 ARG PI_AGENT_VERSION=0.73.1
 ARG DEEPSEEK_HARNESS_VERSION=0.1.0-rc.7
 
+# HTTP_PROXY, HTTPS_PROXY, and NO_PROXY are intentionally left as Docker's
+# predefined build arguments so proxy credentials stay out of image history.
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     HOME=/home/kali \
@@ -44,16 +47,33 @@ COPY scripts/fetch_reference_asset.sh /usr/local/bin/fetch_reference_asset
 COPY scripts/patch_deepseek_harness.py /usr/local/bin/patch_deepseek_harness.py
 
 RUN chmod +x /usr/local/bin/fetch_reference_asset \
-    && pip3 install --break-system-packages pwntools pymongo \
-    && if [ "${INSTALL_NATIVE_AGENTS}" = "true" ]; then \
-        HOME=/root npm_config_cache=/root/.npm npm install -g \
+    && pip3 install --break-system-packages pwntools pymongo
+
+RUN --mount=type=cache,id=slime-worker-npm,target=/root/.npm,sharing=locked \
+    if [ "${INSTALL_NATIVE_AGENTS}" = "true" ]; then \
+        HOME=/root npm_config_cache=/root/.npm \
+        npm_config_audit=false npm_config_fund=false npm_config_update_notifier=false \
+        npm install -g \
             "@openai/codex@${CODEX_VERSION}" \
             "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
-            "@mariozechner/pi-coding-agent@${PI_AGENT_VERSION}" \
-            "@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}"; \
+            "@mariozechner/pi-coding-agent@${PI_AGENT_VERSION}"; \
     fi \
-    && HOME=/root npm_config_cache=/root/.npm npm install -g @playwright/cli@latest \
-    && rm -rf /home/kali/.npm /root/.npm
+    && HOME=/root npm_config_cache=/root/.npm \
+       npm_config_audit=false npm_config_fund=false npm_config_update_notifier=false \
+       npm install -g @playwright/cli@latest
+
+RUN --mount=type=cache,id=slime-worker-npm,target=/root/.npm,sharing=locked \
+    if [ "${INSTALL_NATIVE_AGENTS}" = "true" ]; then \
+        HOME=/root npm_config_cache=/root/.npm \
+        npm_config_fetch_retries=5 \
+        npm_config_fetch_retry_factor=2 \
+        npm_config_fetch_retry_mintimeout=20000 \
+        npm_config_fetch_retry_maxtimeout=120000 \
+        npm install -g --no-audit --no-fund \
+            "@deepseek-ai/dsh@${DEEPSEEK_HARNESS_VERSION}" \
+        && test "$(dsh --version)" = "${DEEPSEEK_HARNESS_VERSION}"; \
+    fi \
+    && rm -rf /home/kali/.npm
 
 RUN if command -v dsh >/dev/null 2>&1; then \
         python3 /usr/local/bin/patch_deepseek_harness.py \

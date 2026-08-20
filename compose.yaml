@@ -1,7 +1,7 @@
 name: slime
 
 x-app: &app
-  image: ${SLIME_APP_IMAGE:-ghcr.io/moumouhao12138-sketch/slime:0.0.39}
+  image: ${SLIME_APP_IMAGE:-ghcr.io/moumouhao12138-sketch/slime:0.0.40}
   build:
     context: .
     dockerfile: Dockerfile
@@ -18,7 +18,7 @@ x-app: &app
     SLIME_RUNTIME_EXECUTION: container
     SLIME_WORKSPACES_ROOT: /workspaces
     SLIME_WORKSPACES_VOLUME: slime-workspaces
-    SLIME_WORKER_IMAGE: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.39}
+    SLIME_WORKER_IMAGE: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.40}
     SLIME_LAB_NETWORK: slime-lab
   init: true
   restart: unless-stopped
@@ -72,7 +72,7 @@ services:
       - slime-lab
 
   worker-image:
-    image: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.39}
+    image: ${SLIME_WORKER_IMAGE:-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.40}
     build:
       context: worker
       dockerfile: ${SLIME_WORKER_DOCKERFILE:-Dockerfile}
