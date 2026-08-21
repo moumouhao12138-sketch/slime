@@ -14,7 +14,7 @@ from uuid import uuid4
 
 DEFAULT_WORKER_IMAGE = os.environ.get(
     "SLIME_WORKER_IMAGE",
-    "ghcr.io/moumouhao12138-sketch/slime-worker:0.0.41",
+    "ghcr.io/moumouhao12138-sketch/slime-worker:0.0.42",
 )
 DEFAULT_CONTAINER_MEMORY: str | None = None
 DEFAULT_CONTAINER_CPUS: str | None = None

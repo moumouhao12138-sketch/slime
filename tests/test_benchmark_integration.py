@@ -389,7 +389,8 @@ class BenchmarkIntegrationTests(unittest.TestCase):
         started = self.controller.start("web_fixture_01")
         project_id = started["project"]["id"]
         project = self.board.get_project(project_id)
-        self.assertFalse(project.scope["bootstrap_enabled"])
+        self.assertEqual(project.scope["start_mode"], "hybrid")
+        self.assertTrue(project.scope["bootstrap_enabled"])
         self.assertEqual(project.target, self.platform.address)
         self.assertNotIn(self.platform.token, json.dumps(self.board.snapshot(project_id), default=str))
 

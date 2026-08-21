@@ -409,7 +409,8 @@ class BenchmarkProjectController:
         return {
             "targets": addresses,
             "origin": addresses[0] if addresses else str(challenge.get("unique_code", "")),
-            "bootstrap_enabled": False,
+            "start_mode": "hybrid",
+            "bootstrap_enabled": True,
             "hints": [],
             "benchmark": {"managed": True, "task_key": self.settings.task_key, **self._metadata(challenge)},
         }

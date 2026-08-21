@@ -10,7 +10,7 @@ on:
       tag:
         description: Container image tag
         required: true
-        default: "0.0.41"
+        default: "0.0.42"
         type: string
 
 permissions:

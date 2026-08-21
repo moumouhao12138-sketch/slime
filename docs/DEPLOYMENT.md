@@ -15,8 +15,8 @@
 应用与 Worker 使用两个独立镜像：
 
 ```text
-ghcr.io/moumouhao12138-sketch/slime:0.0.41
-ghcr.io/moumouhao12138-sketch/slime-worker:0.0.41
+ghcr.io/moumouhao12138-sketch/slime:0.0.42
+ghcr.io/moumouhao12138-sketch/slime-worker:0.0.42
 ```
 
 Dispatcher 挂载 `/var/run/docker.sock`。因此运行 Dispatcher 的身份具有管理该 Docker Engine 的能力，部署主机应只允许受信任的管理员访问。
@@ -153,8 +153,8 @@ Worker 镜像体积较大，首次构建需要较长时间和稳定网络。
 升级前建议备份两个数据卷。回滚时，将 `.env` 中的镜像标签改回已验证版本，再执行相同命令：
 
 ```dotenv
-SLIME_APP_IMAGE=ghcr.io/moumouhao12138-sketch/slime:0.0.40
-SLIME_WORKER_IMAGE=ghcr.io/moumouhao12138-sketch/slime-worker:0.0.37
+SLIME_APP_IMAGE=ghcr.io/moumouhao12138-sketch/slime:0.0.41
+SLIME_WORKER_IMAGE=ghcr.io/moumouhao12138-sketch/slime-worker:0.0.41
 ```
 
 当 Worker 镜像引用或镜像 ID 变化时，Dispatcher 会按需重建项目 Worker 容器；项目 workspace 保存在独立数据卷中。

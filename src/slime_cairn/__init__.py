@@ -1,5 +1,4 @@
 """Slime Cairn: a Physarum-inspired exploration runtime."""
 
-__version__ = "0.0.41"
-
+__version__ = "0.0.42"
 

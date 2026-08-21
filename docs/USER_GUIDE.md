@@ -42,7 +42,7 @@
 
 创建成功后项目状态为 `running`，Dispatcher 会自动发现并调度，无需单独启动 Worker。
 
-Agent Match 测试平台创建的项目固定使用 `hybrid`：先运行 Cairn Bootstrap 建立事实，再强制进入 Reason，由黏菌分支调度 Explore；Bootstrap 不会直接结束平台项目。
+Agent Match 和 Benchmark 测试平台创建的项目固定使用 `hybrid`：先运行 Cairn Bootstrap 建立事实，再强制进入 Reason，由黏菌分支调度 Explore；Bootstrap 不会直接结束平台项目。
 
 ## 3. 查看项目
 
