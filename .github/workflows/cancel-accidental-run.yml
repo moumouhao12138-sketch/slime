@@ -17,9 +17,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: "32433699216"
-        run: gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/cancel"
+        run: gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/cancel" || true
 
       - name: Remove the accidental GitHub release
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete slime.v0.42 --repo "$GITHUB_REPOSITORY" --yes
+        run: gh release delete slime.v0.42 --repo "$GITHUB_REPOSITORY" --yes || true
