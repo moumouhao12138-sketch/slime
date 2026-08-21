@@ -1,0 +1,20 @@
+name: Cancel accidental release run
+
+on:
+  push:
+    branches:
+      - cairn-runtime
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel the accidental release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: "32433699216"
+        run: gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/cancel"
