@@ -7,7 +7,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   cancel:
@@ -18,3 +18,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: "32433699216"
         run: gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/cancel"
+
+      - name: Remove the accidental GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete slime.v0.42 --repo "$GITHUB_REPOSITORY" --yes
