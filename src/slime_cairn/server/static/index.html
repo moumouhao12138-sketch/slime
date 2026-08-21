@@ -377,6 +377,11 @@
     .benchmark-meta { display: flex; flex-wrap: wrap; gap: 7px 14px; color: var(--muted); font-size: 11px; }
     .benchmark-meta strong { color: var(--ink); }
     .benchmark-address { padding: 7px 9px; border: 1px solid #dce9e7; border-radius: 5px; background: #f1f8f7; color: #24534f; font-family: Consolas, monospace; font-size: 11px; overflow-wrap: anywhere; user-select: text; }
+    .benchmark-resource { display: grid; gap: 5px; padding: 7px 9px; border: 1px solid #e2e8e8; border-radius: 5px; background: #fff; color: #31494e; font-size: 11px; }
+    .benchmark-resource-title { color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; }
+    .benchmark-files { display: flex; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+    .benchmark-file { min-width: 0; overflow-wrap: anywhere; }
+    .benchmark-file a { color: #0b625b; text-decoration: underline; text-underline-offset: 2px; }
     .benchmark-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
     .benchmark-submit { display: flex; min-width: min(100%, 390px); flex: 1 1 340px; gap: 7px; }
     .benchmark-submit .dialog-input { min-width: 0; min-height: 32px; }
@@ -892,6 +897,158 @@
         return state.projects.find((project) => project.id === id) || null;
       }
 
+      const competitionResourceLabels = {
+        attachment: "附件题",
+        network: "网络靶机",
+        mixed: "附件 + 网络靶机",
+        unknown: "资源类型待确认",
+      };
+
+      function normalizedResourceType(value) {
+        const normalized = String(value || "").trim().toLowerCase();
+        const aliases = {
+          file: "attachment",
+          files: "attachment",
+          "attachment-only": "attachment",
+          attachment_only: "attachment",
+          endpoint: "network",
+          endpoints: "network",
+          container: "network",
+        };
+        const result = aliases[normalized] || normalized;
+        return Object.prototype.hasOwnProperty.call(competitionResourceLabels, result) ? result : "unknown";
+      }
+
+      function challengeAttachments(challenge) {
+        if (Array.isArray(challenge?.attachments)) {
+          return challenge.attachments.filter((item) => item && typeof item === "object");
+        }
+        const attachment = challenge?.attachment;
+        if (Array.isArray(attachment?.files)) {
+          return attachment.files.filter((item) => item && typeof item === "object");
+        }
+        if (attachment && typeof attachment === "object" && (attachment.url || attachment.previewUrl || attachment.name)) {
+          return [attachment];
+        }
+        return [];
+      }
+
+      function challengeEndpoints(challenge) {
+        return Array.isArray(challenge?.endpoints)
+          ? challenge.endpoints.filter((item) => item && typeof item === "object")
+          : [];
+      }
+
+      function competitionResourceType(challenge) {
+        const explicit = normalizedResourceType(challenge?.resource_type || challenge?.resourceType);
+        if (explicit !== "unknown") return explicit;
+        const attachments = challengeAttachments(challenge);
+        const endpoints = challengeEndpoints(challenge);
+        const hasAddress = Array.isArray(challenge?.container_addr) && challenge.container_addr.length > 0;
+        if (attachments.length && (endpoints.length || hasAddress)) return "mixed";
+        if (attachments.length) return "attachment";
+        if (endpoints.length || hasAddress) return "network";
+        return "unknown";
+      }
+
+      function competitionResourceLabel(type) {
+        return competitionResourceLabels[normalizedResourceType(type)] || competitionResourceLabels.unknown;
+      }
+
+      function projectResourceType(project) {
+        const metadata = project?.scope?.agent_match;
+        if (!metadata || metadata.managed !== true) return "unknown";
+        const explicit = normalizedResourceType(metadata.resource_type || metadata.resourceType);
+        if (explicit !== "unknown") return explicit;
+        if (String(project?.target || "").startsWith("attachment://")) return "attachment";
+        return competitionResourceType(metadata);
+      }
+
+      function projectAttachments(project) {
+        return challengeAttachments(project?.scope?.agent_match || {});
+      }
+
+      function projectTargetLabel(project) {
+        const type = projectResourceType(project);
+        if (type === "attachment") return "附件工作区";
+        return String(project?.target || "").trim() || "-";
+      }
+
+      function resourceFileName(file) {
+        const name = String(file?.name || "").trim();
+        if (name) return name;
+        const rawUrl = String(file?.url || file?.previewUrl || "").trim();
+        if (!rawUrl) return "未命名附件";
+        try {
+          return decodeURIComponent(new URL(rawUrl, window.location.href).pathname.split("/").pop() || "未命名附件");
+        } catch (_) {
+          return rawUrl.split("/").pop() || "未命名附件";
+        }
+      }
+
+      function projectResourceSummary(project) {
+        const type = projectResourceType(project);
+        const names = projectAttachments(project).map(resourceFileName).filter(Boolean);
+        if (type === "attachment") return names.length ? `附件工作区 · ${names.join("、")}` : "附件工作区";
+        if (type === "mixed") {
+          const target = projectTargetLabel(project);
+          return names.length ? `${target} · 附件 ${names.join("、")}` : target;
+        }
+        return projectTargetLabel(project);
+      }
+
+      function appendResourceFiles(parent, files) {
+        if (!files.length) return;
+        const resource = element("div", "benchmark-resource");
+        resource.append(element("div", "benchmark-resource-title", "附件"));
+        const list = element("div", "benchmark-files");
+        files.forEach((file) => {
+          const item = element("span", "benchmark-file");
+          const label = resourceFileName(file);
+          const url = String(file?.url || file?.previewUrl || "").trim();
+          if (/^https?:\/\//i.test(url)) {
+            const link = document.createElement("a");
+            link.href = url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = label;
+            item.append(link);
+          } else {
+            item.textContent = label;
+          }
+          list.append(item);
+        });
+        resource.append(list);
+        parent.append(resource);
+      }
+
+      function challengeAddresses(challenge) {
+        const addresses = Array.isArray(challenge?.container_addr)
+          ? challenge.container_addr.map((value) => String(value || "").trim()).filter(Boolean)
+          : [];
+        if (addresses.length) return [...new Set(addresses)];
+        const result = [];
+        challengeEndpoints(challenge).forEach((endpoint) => {
+          const proxies = Array.isArray(endpoint.proxyIps) ? endpoint.proxyIps : [];
+          const mappings = Array.isArray(endpoint.portMappings) ? endpoint.portMappings : [];
+          const ports = Array.isArray(endpoint.ports) ? endpoint.ports : [];
+          const exposed = Array.isArray(endpoint.exposeIps) ? endpoint.exposeIps : [];
+          const direct = [];
+          const proxy = [];
+          exposed.forEach((host) => {
+            if (ports.length) ports.forEach((port) => direct.push(`${host}:${port}`));
+            else direct.push(String(host || ""));
+          });
+          const selectedMappings = mappings.length ? mappings : ports.map((port) => ({ proxy: port }));
+          proxies.forEach((host) => selectedMappings.forEach((mapping) => {
+            const port = mapping?.proxy || mapping?.port || "";
+            proxy.push(`${host}:${port}`.replace(/:$/, ""));
+          }));
+          result.push(...(endpoint.isProxy ? [...proxy, ...direct] : [...direct, ...proxy]));
+        });
+        return [...new Set(result.filter(Boolean))];
+      }
+
       function currentProject() {
         return state.view ? state.view.project : null;
       }
@@ -1042,14 +1199,14 @@
           });
           const item = element("button", `project-item${project.id === state.selectedProjectId ? " selected" : ""}`);
           item.type = "button";
-          item.title = `${project.name}\n${project.target}`;
+          item.title = `${project.name}\n${projectResourceSummary(project)}`;
           item.addEventListener("click", () => selectProject(project.id));
           const first = element("div", "project-item-line");
           first.append(element("span", "project-item-title", project.name));
           const chip = element("span");
           setStatusChip(chip, project.status);
           first.append(chip);
-          const targetLine = element("div", "project-item-target", project.target);
+          const targetLine = element("div", "project-item-target", projectResourceSummary(project));
           if (project.writeup_status) {
             targetLine.append(document.createTextNode(` · WP ${project.writeup_status === "ready" ? "可提交" : "待补充"}`));
           }
@@ -1081,7 +1238,7 @@
           return;
         }
         byId("project-title").textContent = project.name;
-        byId("project-target").textContent = project.target;
+        byId("project-target").textContent = projectTargetLabel(project);
         setStatusChip(byId("project-status"), project.status);
         viewSwitch.classList.remove("hidden");
         hintButton.classList.remove("hidden");
@@ -1624,7 +1781,11 @@
           inspectorBody.append(metrics);
           const details = element("div", "detail-list");
           const retryingIntents = view.runtime.retrying_intents || [];
-          addDetailLine(details, "目标", view.project.target);
+          addDetailLine(
+            details,
+            projectResourceType(view.project) === "unknown" ? "目标" : "资源",
+            projectResourceSummary(view.project),
+          );
           addDetailLine(details, "Goal", view.project.goal);
           addDetailLine(details, "Dispatcher", view.runtime.dispatcher ? view.runtime.dispatcher.state : "等待");
           addDetailLine(details, "Reason", view.runtime.dispatcher?.status?.reason_running?.worker_name || "-");
@@ -2103,6 +2264,11 @@
             flag_count: challenge.flag_count || 0,
             container_status: challenge.container_status || "stopped",
             container_addr: Array.isArray(challenge.container_addr) ? challenge.container_addr : [],
+            resource_type: competitionResourceType(challenge),
+            attachments: challengeAttachments(challenge).map((file) => ({
+              name: file.name || "",
+              url: file.url || file.previewUrl || "",
+            })),
             project_id: challenge.project_id || "",
             project_status: challenge.project_status || "",
             hasSolved: Boolean(challenge.hasSolved),
@@ -2211,6 +2377,8 @@
           const challengeKey = challenge.unique_code || challenge.id;
           const solved = Boolean(challenge.is_completed || challenge.hasSolved);
           const projectId = challenge.project_id || "";
+          const resourceType = competitionResourceType(challenge);
+          const attachmentFiles = challengeAttachments(challenge);
           const card = element("article", "benchmark-card");
           card.dataset.challengeCode = challengeKey || "";
           const header = element("div", "benchmark-card-header");
@@ -2226,6 +2394,7 @@
           const meta = element("div", "benchmark-meta");
           const metaValues = [
             ["分类", challenge.category_name || "-"],
+            ["资源", competitionResourceLabel(resourceType)],
             ["难度", challenge.difficulty || challenge.level || "-"],
             ["关卡", challenge.level ?? "-"],
             ["分值", challenge.total_score ?? challenge.score ?? "-"],
@@ -2237,20 +2406,20 @@
             meta.append(item);
           });
           card.append(header, meta);
-          const addresses = Array.isArray(challenge.container_addr) ? challenge.container_addr : [];
-          if (!addresses.length && Array.isArray(challenge.endpoints)) {
-            challenge.endpoints.forEach((endpoint) => {
-              const proxies = Array.isArray(endpoint.proxyIps) ? endpoint.proxyIps : [];
-              const mappings = Array.isArray(endpoint.portMappings) ? endpoint.portMappings : [];
-              proxies.forEach((host) => mappings.forEach((mapping) => addresses.push(`${host}:${mapping.proxy || mapping.port || ""}`)));
-            });
-          }
+          const addresses = challengeAddresses(challenge);
           if (addresses.length) {
             card.append(element("div", "benchmark-address", addresses.join(" · ")));
           }
+          appendResourceFiles(card, attachmentFiles);
 
           const actions = element("div", "benchmark-actions");
-          const start = element("button", "button primary", projectId ? "重启 / 同步实例" : "启动并创建项目");
+          const start = element(
+            "button",
+            "button primary",
+            projectId
+              ? (resourceType === "attachment" ? "继续分析" : "重启 / 同步实例")
+              : (resourceType === "attachment" ? "创建分析项目" : "启动并创建项目"),
+          );
           start.type = "button";
           start.disabled = solved;
           start.addEventListener("click", () => benchmarkStart(challengeKey, start));
@@ -2271,7 +2440,10 @@
             hint.addEventListener("click", () => benchmarkHint(challengeKey, hint));
             actions.append(hint);
           }
-          if (agentMode ? (projectId && !solved) : ["available", "pending", "stop_pending"].includes(challenge.container_status)) {
+          const canCloseRemote = agentMode
+            ? resourceType !== "attachment" && Boolean(projectId) && !solved
+            : ["available", "pending", "stop_pending"].includes(challenge.container_status);
+          if (canCloseRemote) {
             const close = element("button", "button critical", "关闭实例");
             close.type = "button";
             close.addEventListener("click", () => benchmarkClose(challengeKey, close));
@@ -2394,17 +2566,23 @@
 
       async function benchmarkStart(uniqueCode, button) {
         const originalLabel = button.textContent;
+        const challenge = state.benchmarkChallenges.find((item) => String(item.unique_code || item.id) === String(uniqueCode)) || {};
+        const resourceType = competitionResourceType(challenge);
         button.disabled = true;
         button.textContent = "正在启动…";
         state.benchmarkActionError = "";
-        showToast(`题目 ${uniqueCode} 正在启动，等待平台返回环境…`);
+        showToast(resourceType === "attachment"
+          ? `题目 ${uniqueCode} 正在创建分析项目…`
+          : `题目 ${uniqueCode} 正在启动，等待平台返回环境…`);
         try {
           const path = state.benchmarkMode === "agent-match"
             ? `/agent-match/exercises/${encodeURIComponent(uniqueCode)}/start`
             : `/benchmark/challenges/${encodeURIComponent(uniqueCode)}/start`;
           const result = await request(path, { method: "POST" });
           state.selectedProjectId = result.project?.id || state.selectedProjectId;
-          showToast(`题目 ${uniqueCode} 已启动，Reason 将生成并行探索分支`);
+          showToast(resourceType === "attachment"
+            ? `题目 ${uniqueCode} 已创建分析项目，Reason 将生成并行探索分支`
+            : `题目 ${uniqueCode} 已启动，Reason 将生成并行探索分支`);
           state.benchmarkActionError = "";
           await loadBenchmarkChallenges();
           await refresh(true);

@@ -27,12 +27,14 @@ class AgentMatchPlatformFixture:
         self.initialized = False
         self.solved = False
         self.calls: list[httpx.Request] = []
+        self.exercise_id = 1001
+        self.exercise_name = "fixture-web"
 
     def _detail(self) -> dict:
         ready = self.initialized
         return {
-            "id": 1001,
-            "name": "fixture-web",
+            "id": self.exercise_id,
+            "name": self.exercise_name,
             "description": "Inspect the authorized fixture service.",
             "hasSolved": self.solved,
             "score": "100",
@@ -72,7 +74,7 @@ class AgentMatchPlatformFixture:
             return httpx.Response(
                 200,
                 json=self.envelope(
-                    [{"id": 10, "name": "Web", "order": 1, "corpus": [{"id": 1001, "name": "fixture-web", "order": 1, "isOpen": True, "hasSolved": self.solved}]}]
+                    [{"id": 10, "name": "Web", "order": 1, "corpus": [{"id": self.exercise_id, "name": self.exercise_name, "order": 1, "isOpen": True, "hasSolved": self.solved}]}]
                 ),
             )
         if path.endswith("/ctf/exercise"):
@@ -90,6 +92,27 @@ class AgentMatchPlatformFixture:
             self.solved = True
             return httpx.Response(200, json=self.envelope({"isCorrect": True}))
         return httpx.Response(404, json=self.envelope({}, "NOT_FOUND", "missing"))
+
+
+class AttachmentOnlyPlatformFixture(AgentMatchPlatformFixture):
+    def __init__(self) -> None:
+        super().__init__()
+        self.exercise_id = 2002
+        self.exercise_name = "fixture-forensics"
+
+    def _detail(self) -> dict:
+        return {
+            "id": self.exercise_id,
+            "name": self.exercise_name,
+            "description": "Inspect the supplied fixture archive.",
+            "hasSolved": self.solved,
+            "score": "100",
+            "difficulty": "EASY",
+            "attachment": {"files": [{"name": "forensics.tar.gz", "url": "https://download.fixture/forensics", "ext": "tar.gz"}]},
+            "endpoints": [],
+            "isNeedInit": False,
+            "isNeedCheck": False,
+        }
 
 
 class FlagLikeFactMind:
@@ -162,6 +185,8 @@ class AgentMatchIntegrationTests(unittest.TestCase):
         self.assertEqual(project.scope["submission"]["platform"], "agent_match")
         self.assertEqual(project.scope["agent_match"]["category_id"], 10)
         self.assertEqual(project.scope["agent_match"]["category_name"], "Web")
+        self.assertEqual(project.scope["agent_match"]["resource_type"], "mixed")
+        self.assertEqual(project.scope["agent_match"]["attachments"][0]["name"], "fixture.zip")
         self.assertNotIn(self.platform.access_key, json.dumps(self.board.snapshot(project_id), default=str))
         self.assertTrue(any(request.url.path.endswith("/ctf/build-exercise-env") for request in self.platform.calls))
         self.assertTrue(
@@ -192,6 +217,8 @@ class AgentMatchIntegrationTests(unittest.TestCase):
             "a platform-verified completion must reclaim its remote exercise environment",
         )
         self.assertTrue(self.board.get_project(project_id).scope["agent_match"]["environment_recovered"])
+        recovered_metadata = self.board.get_project(project_id).scope["agent_match"]
+        self.assertEqual(recovered_metadata["resource_type"], "mixed")
 
         recovered = self.controller.recover(1001)
         self.assertTrue(recovered["recovered"])
@@ -202,6 +229,32 @@ class AgentMatchIntegrationTests(unittest.TestCase):
         self.assertEqual(normalize("DASCTF{answer-value}"), "answer-value")
         self.assertEqual(normalize("flag{answer-value}"), "answer-value")
         self.assertEqual(normalize("SPECIAL::answer-value"), "SPECIAL::answer-value")
+
+    def test_attachment_only_exercise_does_not_build_environment_or_expose_target(self) -> None:
+        platform = AttachmentOnlyPlatformFixture()
+        settings = AgentMatchSettings(
+            "https://match.fixture",
+            platform.access_key,
+            timeout=5,
+            environment_poll_interval=0.001,
+            environment_ready_timeout=1,
+        )
+        client = AgentMatchClient(settings, transport=httpx.MockTransport(platform.handler))
+        controller = AgentMatchProjectController(self.board, client, settings)
+        try:
+            started = controller.start(platform.exercise_id)
+            project = self.board.get_project(started["project"]["id"])
+            metadata = project.scope["agent_match"]
+            self.assertEqual(metadata["resource_type"], "attachment")
+            self.assertEqual(metadata["attachments"][0]["name"], "forensics.tar.gz")
+            self.assertEqual(metadata["endpoints"], [])
+            self.assertEqual(project.target, "attachment://agent-match/2002")
+            self.assertFalse(any(request.url.path.endswith("/ctf/build-exercise-env") for request in platform.calls))
+            listed = controller.list_exercises()[0]
+            self.assertEqual(listed["resource_type"], "attachment")
+            self.assertEqual(listed["attachments"][0]["name"], "forensics.tar.gz")
+        finally:
+            client.close_client()
 
     def test_scheduler_selects_agent_match_submission_controller(self) -> None:
         project_id = self.controller.start(1001)["project"]["id"]

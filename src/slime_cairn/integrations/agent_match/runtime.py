@@ -6,7 +6,7 @@ from dataclasses import asdict
 import json
 import re
 import time
-from typing import Any
+from typing import Any, Mapping
 
 from ...domain.models import Fact, FactCandidate, Project, fingerprint, new_id
 from ...domain.seeding import seed_project_context_facts
@@ -19,6 +19,71 @@ from .client import AgentMatchClient, AgentMatchError, AgentMatchSettings
 
 MAX_SUBMISSION_ATTEMPTS = 50
 WRAPPED_FLAG = re.compile(r"^(?:DASCTF|flag)\{(.+)\}$", re.IGNORECASE | re.DOTALL)
+
+RESOURCE_TYPE_ATTACHMENT = "attachment"
+RESOURCE_TYPE_NETWORK = "network"
+RESOURCE_TYPE_MIXED = "mixed"
+RESOURCE_TYPE_UNKNOWN = "unknown"
+AGENT_MATCH_RESOURCE_TYPES = frozenset(
+    {
+        RESOURCE_TYPE_ATTACHMENT,
+        RESOURCE_TYPE_NETWORK,
+        RESOURCE_TYPE_MIXED,
+        RESOURCE_TYPE_UNKNOWN,
+    }
+)
+
+
+def normalize_agent_match_resource_type(value: Any) -> str:
+    """Keep resource labels stable across platform/API naming variants."""
+
+    normalized = str(value or "").strip().casefold()
+    aliases = {
+        "file": RESOURCE_TYPE_ATTACHMENT,
+        "files": RESOURCE_TYPE_ATTACHMENT,
+        "attachment-only": RESOURCE_TYPE_ATTACHMENT,
+        "attachment_only": RESOURCE_TYPE_ATTACHMENT,
+        "endpoint": RESOURCE_TYPE_NETWORK,
+        "endpoints": RESOURCE_TYPE_NETWORK,
+        "container": RESOURCE_TYPE_NETWORK,
+    }
+    normalized = aliases.get(normalized, normalized)
+    return normalized if normalized in AGENT_MATCH_RESOURCE_TYPES else RESOURCE_TYPE_UNKNOWN
+
+
+def infer_agent_match_resource_type(
+    detail: Mapping[str, Any] | None = None,
+    *,
+    attachments: Any = None,
+    endpoints: Any = None,
+    fallback: Any = RESOURCE_TYPE_UNKNOWN,
+) -> str:
+    """Classify a challenge from its supplied files and network endpoints.
+
+    ``fallback`` is intentionally used only when the platform response omits
+    both resource collections (for example, after an environment is reclaimed).
+    """
+
+    payload = detail or {}
+    explicit = normalize_agent_match_resource_type(
+        payload.get("resource_type") or payload.get("resourceType")
+    )
+    if explicit != RESOURCE_TYPE_UNKNOWN:
+        return explicit
+    if attachments is None:
+        attachments = payload.get("attachments")
+    if endpoints is None:
+        endpoints = payload.get("endpoints")
+
+    has_attachments = bool(attachments)
+    has_endpoints = bool(endpoints)
+    if has_attachments and has_endpoints:
+        return RESOURCE_TYPE_MIXED
+    if has_attachments:
+        return RESOURCE_TYPE_ATTACHMENT
+    if has_endpoints:
+        return RESOURCE_TYPE_NETWORK
+    return normalize_agent_match_resource_type(fallback)
 
 
 def agent_match_metadata(project: Project) -> dict[str, Any] | None:
@@ -144,15 +209,35 @@ class AgentMatchProjectController:
                 except (TypeError, ValueError):
                     continue
                 project = self.find_project(exercise_id)
+                metadata = agent_match_metadata(project) if project is not None else None
                 if project is not None:
                     project = self._persist_category(
                         project,
                         {"category_id": category_id, "category_name": category_name},
                     )
+                    metadata = agent_match_metadata(project)
+
+                # The list endpoint is allowed to contain only a compact
+                # summary.  Reuse the durable project metadata when it has
+                # already been populated by start/sync so a reclaimed
+                # environment does not make a network challenge look like an
+                # attachment-only challenge.
+                attachments = self._attachments(exercise)
+                if not attachments and metadata:
+                    attachments = [dict(item) for item in metadata.get("attachments", []) if isinstance(item, dict)]
+                    if attachments:
+                        exercise["attachments"] = attachments
+                endpoints = self._endpoint_objects(exercise)
+                if not endpoints and metadata:
+                    endpoints = [dict(item) for item in metadata.get("endpoints", []) if isinstance(item, dict)]
+                    if endpoints:
+                        exercise["endpoints"] = endpoints
+                resource_type = self._resource_type(exercise, fallback=(metadata or {}).get("resource_type"))
                 exercise.update(
                     {
                         "category_id": category_id,
                         "category_name": category_name,
+                        "resource_type": resource_type,
                         "project_id": project.id if project and project.status != "deleting" else None,
                         "project_status": project.status if project and project.status != "deleting" else None,
                     }
@@ -163,6 +248,8 @@ class AgentMatchProjectController:
     def exercise(self, exercise_id: int) -> dict[str, Any]:
         detail = self.client.get_exercise(exercise_id)
         project = self.find_project(exercise_id)
+        metadata = agent_match_metadata(project) if project is not None else None
+        detail = self._presentation_detail(detail, fallback=(metadata or {}).get("resource_type"))
         return {
             "exercise": detail,
             "project_id": project.id if project and project.status != "deleting" else None,
@@ -190,7 +277,7 @@ class AgentMatchProjectController:
             raise AgentMatchError(
                 409,
                 "environment_not_ready",
-                "Exercise environment is not ready; start it and wait for endpoints",
+                "Exercise resources are not ready; start it and wait for the platform to finish",
             )
         return self._activate_exercise(
             detail,
@@ -518,9 +605,15 @@ class AgentMatchProjectController:
         match_info: dict[str, Any],
     ) -> dict[str, Any]:
         exercise_id = int(detail.get("id") or 0)
+        project = self.find_project(exercise_id)
+        previous_metadata = agent_match_metadata(project) if project is not None else None
         targets = self._targets(detail)
+        resource_type = self._resource_type(
+            detail,
+            fallback=(previous_metadata or {}).get("resource_type"),
+        )
         if not targets:
-            if self._attachments(detail):
+            if resource_type == RESOURCE_TYPE_ATTACHMENT:
                 targets = [f"attachment://agent-match/{exercise_id}"]
             else:
                 raise AgentMatchError(
@@ -529,8 +622,7 @@ class AgentMatchProjectController:
                     "Exercise environment returned no usable endpoint address or attachment",
                 )
         target = targets[0]
-        project = self.find_project(exercise_id)
-        scope = self._scope(detail, targets, match_info)
+        scope = self._scope(detail, targets, match_info, previous=previous_metadata)
         if project is None:
             project = self.board.create_project(
                 name=f"agent-match-{exercise_id}",
@@ -581,7 +673,7 @@ class AgentMatchProjectController:
         if not metadata:
             return project
         targets = self._targets(detail)
-        metadata.update(self._metadata(detail))
+        metadata.update(self._metadata(detail, previous=metadata))
         scope = dict(project.scope)
         scope["agent_match"] = metadata
         if targets:
@@ -600,6 +692,7 @@ class AgentMatchProjectController:
                 "name": detail.get("name"),
                 "difficulty": detail.get("difficulty"),
                 "attachments": self._attachments(detail),
+                "resource_type": self._resource_type(detail),
             },
         )
         self.board.add_fact(
@@ -620,6 +713,8 @@ class AgentMatchProjectController:
         detail: dict[str, Any],
         targets: list[str],
         match_info: dict[str, Any],
+        *,
+        previous: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         return {
             "targets": targets,
@@ -637,13 +732,20 @@ class AgentMatchProjectController:
                 "task_key": self.settings.task_key,
                 "match_note": str(match_info.get("note") or "").strip(),
                 "match_rule": str(match_info.get("rule") or "").strip(),
-                **self._metadata(detail),
+                **self._metadata(detail, previous=previous),
                 **self._category_for_exercise(int(detail.get("id") or 0)),
             },
         }
 
-    def _metadata(self, detail: dict[str, Any]) -> dict[str, Any]:
+    def _metadata(
+        self,
+        detail: dict[str, Any],
+        *,
+        previous: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         endpoints = self._endpoint_objects(detail)
+        attachments = self._attachments(detail)
+        previous = previous or {}
         return {
             "exercise_id": int(detail.get("id") or 0),
             "name": str(detail.get("name") or "").strip(),
@@ -651,7 +753,9 @@ class AgentMatchProjectController:
             "difficulty": detail.get("difficulty"),
             "score": detail.get("score"),
             "has_solved": bool(detail.get("hasSolved")),
-            "attachments": self._attachments(detail),
+            "attachments": attachments or [
+                dict(item) for item in previous.get("attachments", []) if isinstance(item, dict)
+            ],
             "endpoints": endpoints,
             "endpoint_type": detail.get("endpointType"),
             "endpoint_expire_times": [
@@ -660,10 +764,58 @@ class AgentMatchProjectController:
                 if isinstance(item, dict) and item.get("expireTime") is not None
             ],
             "environment_recovered": False,
+            "resource_type": self._resource_type(
+                detail,
+                fallback=previous.get("resource_type"),
+            ),
         }
+
+    @classmethod
+    def _resource_type(cls, detail: Mapping[str, Any], *, fallback: Any = RESOURCE_TYPE_UNKNOWN) -> str:
+        attachments = cls._attachments(detail)
+        endpoints = cls._endpoint_objects(detail)
+        inferred = infer_agent_match_resource_type(
+            detail,
+            attachments=attachments,
+            endpoints=endpoints,
+            fallback=RESOURCE_TYPE_UNKNOWN,
+        )
+        fallback_type = normalize_agent_match_resource_type(fallback)
+        # Once a network or mixed project has been reclaimed, the platform can
+        # return the durable attachment while clearing ``endpoints``.  Keep
+        # the original classification instead of changing the project into a
+        # file-only exercise on the next poll.
+        if inferred == RESOURCE_TYPE_ATTACHMENT and not endpoints and fallback_type in {
+            RESOURCE_TYPE_NETWORK,
+            RESOURCE_TYPE_MIXED,
+        }:
+            return fallback_type
+        return inferred if inferred != RESOURCE_TYPE_UNKNOWN else fallback_type
+
+    @classmethod
+    def _presentation_detail(
+        cls,
+        detail: dict[str, Any],
+        *,
+        fallback: Any = RESOURCE_TYPE_UNKNOWN,
+    ) -> dict[str, Any]:
+        """Add UI-safe derived resource fields without changing platform data."""
+
+        result = dict(detail)
+        attachments = cls._attachments(result)
+        endpoints = cls._endpoint_objects(result)
+        result["attachments"] = attachments
+        result["endpoints"] = endpoints
+        result["resource_type"] = cls._resource_type(result, fallback=fallback)
+        return result
 
     @staticmethod
     def _attachments(detail: dict[str, Any]) -> list[dict[str, Any]]:
+        listed = detail.get("attachments")
+        if isinstance(listed, list):
+            normalized = [dict(item) for item in listed if isinstance(item, dict)]
+            if normalized:
+                return normalized
         attachment = detail.get("attachment")
         if not isinstance(attachment, dict):
             return []

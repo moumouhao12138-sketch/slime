@@ -157,6 +157,25 @@ class StaticUiTests(unittest.TestCase):
         self.assertIn("confirm_score_penalty: true", html)
         self.assertIn("AI 也会自动提交", html)
 
+    def test_agent_match_resource_types_render_attachments_without_fake_targets(self) -> None:
+        html = STATIC_UI_PATH.read_text(encoding="utf-8")
+
+        for marker in (
+            "function competitionResourceType",
+            "function challengeAttachments",
+            "function projectTargetLabel",
+            "function appendResourceFiles",
+            "resource_type: competitionResourceType(challenge)",
+            'resourceType === "attachment" ? "继续分析"',
+            'resourceType === "attachment" ? "创建分析项目"',
+            'resourceType !== "attachment" && Boolean(projectId) && !solved',
+            'link.rel = "noopener noreferrer"',
+            "projectTargetLabel(project)",
+        ):
+            self.assertIn(marker, html)
+        self.assertIn('"附件工作区"', html)
+        self.assertIn('"附件 + 网络靶机"', html)
+
 
 if __name__ == "__main__":
     unittest.main()
